@@ -1,0 +1,22 @@
+{
+    "db_clients": [{
+        "name": "default",
+        "rdbms": "mysql",
+        "host": "127.0.0.1",
+        "port": 3306,
+        "dbname": "yukime",
+        "user": "root",
+        "passwd": "",
+        "is_fast": false,
+        "number_of_connections": 32,
+        "timeout": -1.0
+    }],
+    "custom_config": {
+        "osu_api_key": "",
+        "osu_username": "",
+        "osu_password": "",
+        "preferred_memory_usage": 2048,
+        "max_memory_usage": 4096,
+        "beatmap_timeout": 1200
+    }
+}

@@ -1,0 +1,94 @@
+#ifdef HANARU_CACHE
+
+#include "cache_system.h"
+
+#include <drogon/HttpAppFramework.h>
+
+#include <shared_mutex>
+
+int32_t preferred_memory_usage = 2048; // 2 GB
+int32_t max_memory_usage = 4096; // 4 GB
+
+int32_t beatmap_timeout = 1200; // 20 minutes
+
+std::shared_mutex mtx;
+std::atomic_int64_t total_memory_usage;
+std::unordered_map<int32_t, hanaru::cached_beatmap> cache = {};
+
+std::atomic_bool memory_threshold = false;
+
+int64_t hanaru::memory_usage() {
+    // Convert raw bytes to megabytes
+    return total_memory_usage >> 20;
+}
+
+void hanaru::initialize() {
+    Json::Value config = drogon::app().getCustomConfig();
+
+    if (config["preferred_memory_usage"].isIntegral()) {
+        preferred_memory_usage = std::max(config["preferred_memory_usage"].asInt64(), 512LL);
+    }
+
+    if (config["max_memory_usage"].isIntegral()) {
+        max_memory_usage = std::max(config["max_memory_usage"].asInt64(), 1024LL);
+    }
+
+    if (config["beatmap_timeout"].isIntegral()) {
+        beatmap_timeout = std::max(config["beatmap_timeout"].asInt64(), 240LL);
+    }
+
+    drogon::app().getIOLoop(1)->runEvery(60, [&]() {
+
+        std::unique_lock<std::shared_mutex> lock(mtx);
+        auto it = cache.begin();
+        while (it != cache.end()) {
+            int64_t expire = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - it->second.timestamp).count();
+            int64_t timeout = (preferred_memory_usage > memory_usage()) ? beatmap_timeout : beatmap_timeout >> 1;
+
+            if (memory_threshold) { // Protective mode enabled, we should cleanup memory as fast as we can
+                timeout >>= 1;
+            }
+
+            if (expire > timeout) {
+                total_memory_usage -= it->second.content.size();
+                it = cache.erase(it);
+                continue;
+            }
+
+            it++;
+        }
+
+    });
+}
+
+
+void hanaru::insert(int32_t id, hanaru::cached_beatmap btm) {
+    // Cache enters protective mode where memory should be cleaned
+    if (memory_usage() > max_memory_usage) {
+        memory_threshold = true;
+        return;
+    }
+
+    if (memory_threshold && memory_usage() > preferred_memory_usage) {
+        return;
+    }
+
+    memory_threshold = false;
+    total_memory_usage += btm.content.size();
+
+    std::unique_lock<std::shared_mutex> lock(mtx);
+    cache.emplace(id, btm);
+}
+
+std::optional<hanaru::cached_beatmap> hanaru::get(int32_t id) {
+    std::shared_lock<std::shared_mutex> lock(mtx);
+    auto it = cache.find(id);
+
+    if (it != cache.end()) {
+        return std::make_optional<hanaru::cached_beatmap>(it->second);
+    }
+
+    return {};
+}
+
+#endif

@@ -1,0 +1,79 @@
+#include "BeatmapSetRoute.h"
+
+#include "../impl/downloader.h"
+
+void BeatmapSetRoute::get(const HttpRequestPtr& req, std::function<void(const HttpResponsePtr&)>&& callback, int32_t id) {
+    auto db = app().getDbClient();
+
+    const orm::Result& result = db->execSqlSync("SELECT * FROM beatmaps WHERE beatmapset_id = ?", id);
+    if (result.empty()) {
+        auto [beatmaps, status] = hanaru::download_beatmapset(id);
+        auto response = HttpResponse::newHttpJsonResponse(beatmaps);
+        response->setStatusCode(status);
+        callback(response);
+        return;
+    }
+
+    // Workaround for GCC
+    typedef long long int64_t;
+    Json::Value beatmaps = Json::arrayValue;
+
+    for (auto row : result) {
+        Json::Value beatmap;
+
+        beatmap["beatmap_id"]       = row["beatmap_id"].as<int32_t>();
+        beatmap["beatmapset_id"]    = row["beatmapset_id"].as<int32_t>();
+        beatmap["beatmap_md5"]      = row["beatmap_md5"].as<std::string>();
+        beatmap["artist"]           = row["artist"].as<std::string>();
+        beatmap["title"]            = row["title"].as<std::string>();
+        beatmap["version"]          = row["difficulty_name"].as<std::string>();
+        beatmap["creator"]          = row["creator"].as<std::string>();
+        beatmap["count_normal"]     = row["count_normal"].as<int32_t>();
+        beatmap["count_slider"]     = row["count_slider"].as<int32_t>();
+        beatmap["count_spinner"]    = row["count_spinner"].as<int32_t>();
+        beatmap["max_combo"]        = row["max_combo"].as<int32_t>();
+        beatmap["ranked_status"]    = row["ranked_status"].as<int32_t>();
+        beatmap["creating_date"]    = hanaru::int_to_time(row["creating_date"].as<int64_t>());
+        beatmap["bpm"]              = row["bpm"].as<int32_t>();
+        beatmap["hit_length"]       = row["hit_length"].as<int32_t>();
+
+        Json::Value diffs;
+        diffs["difficulty_std"]     = row["difficulty_std"].as<float>();
+        diffs["difficulty_taiko"]   = row["difficulty_taiko"].as<float>();
+        diffs["difficulty_ctb"]     = row["difficulty_ctb"].as<float>();
+        diffs["difficulty_mania"]   = row["difficulty_mania"].as<float>();
+        beatmap["difficulties"] = diffs;
+
+        const int32_t mode = row["mode"].as<int32_t>();
+        switch (mode) {
+            default:
+            case 0: {
+                beatmap["difficulty"] = beatmap["difficulties"]["difficulty_std"];
+                break;
+            }
+            case 1: {
+                beatmap["difficulty"] = beatmap["difficulties"]["difficulty_taiko"];
+                break;
+            }
+            case 2: {
+                beatmap["difficulty"] = beatmap["difficulties"]["difficulty_ctb"];
+                break;
+            }
+            case 3: {
+                beatmap["difficulty"] = beatmap["difficulties"]["difficulty_mania"];
+                break;
+            }
+        }
+
+        beatmap["cs"] = row["cs"].as<float>();
+        beatmap["ar"] = row["ar"].as<float>();
+        beatmap["od"] = row["od"].as<float>();
+        beatmap["hp"] = row["hp"].as<float>();
+        beatmap["mode"] = mode;
+
+        beatmaps.append(beatmap);
+    }
+    
+    auto response = HttpResponse::newHttpJsonResponse(beatmaps);
+    callback(response);
+}
