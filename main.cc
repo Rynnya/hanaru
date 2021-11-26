@@ -19,7 +19,7 @@ void defaultHandler(const HttpRequestPtr& req, std::function<void(const HttpResp
     auto response = drogon::HttpResponse::newHttpResponse();
     response->setContentTypeString("text/plain; charset=utf-8");
     response->setBody(
-        "hanaru v0.1\n"
+        "hanaru v0.2\n"
         #ifdef HANARU_CACHE
         "cache memory usage: " + std::to_string(hanaru::memory_usage()) + " mb's\n"
         #endif
@@ -34,6 +34,12 @@ int main() {
         .addListener("0.0.0.0", 8090)
         .setCustomErrorHandler(errorHandler)
         .setDefaultHandler(defaultHandler)
+        .registerHandler("/favicon.ico", [](const HttpRequestPtr& req, std::function<void(const HttpResponsePtr &)>&& callback) {
+            HttpResponsePtr response = HttpResponse::newHttpResponse();
+            response->setStatusCode(k204NoContent);
+            response->setBody("");
+            callback(response);
+        })
         .loadConfigFile("config.json");
     hanaru::initialize_client();
     drogon::app().run();

@@ -68,15 +68,19 @@ std::tuple<Json::Value, drogon::HttpStatusCode> hanaru::download_beatmap(int32_t
                 case 0:
                 default: {
                     std = row["difficultyrating"].asString();
+                    break;
                 }
                 case 1: {
                     taiko = row["difficultyrating"].asString();
+                    break;
                 }
                 case 2: {
                     ctb = row["difficultyrating"].asString();
+                    break;
                 }
                 case 3: {
                     mania = row["difficultyrating"].asString();
+                    break;
                 }
             }
 
@@ -172,15 +176,19 @@ std::tuple<Json::Value, drogon::HttpStatusCode> hanaru::download_beatmapset(int3
                     case 0:
                     default: {
                         std = row["difficultyrating"].asString();
+                        break;
                     }
                     case 1: {
                         taiko = row["difficultyrating"].asString();
+                        break;
                     }
                     case 2: {
                         ctb = row["difficultyrating"].asString();
+                        break;
                     }
                     case 3: {
                         mania = row["difficultyrating"].asString();
+                        break;
                     }
                 }
 
