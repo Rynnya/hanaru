@@ -26,15 +26,24 @@ void hanaru::initialize() {
     Json::Value config = drogon::app().getCustomConfig();
 
     if (config["preferred_memory_usage"].isIntegral()) {
-        preferred_memory_usage = std::max(config["preferred_memory_usage"].asInt64(), 512LL);
+        preferred_memory_usage = config["preferred_memory_usage"].asInt64();
+        if (preferred_memory_usage < 512) {
+            preferred_memory_usage = 512;
+        }
     }
 
     if (config["max_memory_usage"].isIntegral()) {
-        max_memory_usage = std::max(config["max_memory_usage"].asInt64(), 1024LL);
+        max_memory_usage = config["max_memory_usage"].asInt64();
+        if (max_memory_usage < 1024) {
+            max_memory_usage = 1024;
+        }
     }
 
     if (config["beatmap_timeout"].isIntegral()) {
-        beatmap_timeout = std::max(config["beatmap_timeout"].asInt64(), 240LL);
+        beatmap_timeout = config["beatmap_timeout"].asInt64();
+        if (beatmap_timeout < 240) {
+            beatmap_timeout = 240;
+        }
     }
 
     drogon::app().getIOLoop(1)->runEvery(60, [&]() {
