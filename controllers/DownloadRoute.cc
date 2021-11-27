@@ -37,8 +37,8 @@ std::tuple<std::string, std::string, std::string> split_download_link(const std:
     size_t ptr = link.find("ppy.sh");
     std::string query = link.substr(ptr + 6);
     std::string filename = query.substr(query.find("fs=") + 3);
-    size_t enc_ptr = filename.find("%20") + 3;
-    filename = filename.substr(enc_ptr, filename.find(".osz") + 4 - enc_ptr);
+    filename = filename.substr(0, filename.find(".osz") + 4);
+
     return { std::string(link.begin(), link.begin() + ptr + 6), query, utils::urlDecode(filename) };
 }
 
