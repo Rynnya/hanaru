@@ -47,9 +47,7 @@ void init() {
         fs::create_directory(beatmap_path);
     }
 
-#ifdef HANARU_CACHE
     hanaru::initialize();
-#endif
 
     app().getIOLoop(1)->runEvery(10, [&]() {
         if (limiter > 0) {
@@ -244,20 +242,22 @@ void DownloadRoute::get(const HttpRequestPtr& req, std::function<void(const Http
             "application/x-osu-beatmap-archive"
         );
 
-        db->execSqlAsync(
-            filename_insert_query,
-            [](const orm::Result&) {},
-            [](const orm::DrogonDbException&) {},
-            id, filename
-        );
-
 #ifdef HANARU_CACHE
         hanaru::insert(id, hanaru::cached_beatmap(filename, view.data(), view.size()));
 #endif
 
-        std::ofstream beatmap_file(beatmap, std::ios::binary);
-        beatmap_file.write(view.data(), view.size());
-        beatmap_file.close();
+        if (hanaru::can_write()) {
+            db->execSqlAsync(
+                filename_insert_query,
+                [](const orm::Result&) {},
+                [](const orm::DrogonDbException&) {},
+                id, filename
+            );
+
+            std::ofstream beatmap_file(beatmap, std::ios::binary);
+            beatmap_file.write(view.data(), view.size());
+            beatmap_file.close();
+        }
 
         callback(response);
     }

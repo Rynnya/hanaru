@@ -17,6 +17,7 @@
         "osu_password": "",
         "preferred_memory_usage": 2048,
         "max_memory_usage": 4096,
-        "beatmap_timeout": 1200
+        "beatmap_timeout": 1200,
+        "required_free_space": 5120
     }
 }

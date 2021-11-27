@@ -1,8 +1,9 @@
 #pragma once
 
+#include <cstdint>
+
 #ifdef HANARU_CACHE
 
-#include <cstdint>
 #include <chrono>
 #include <string>
 #include <optional>
@@ -25,9 +26,6 @@ namespace hanaru {
     // Returns memory usage in megabytes
     int64_t memory_usage();
 
-    // Load's values from config.json
-    void initialize();
-
     // Insert's new beatmap into cache (if total_memory_usage is lower than max_memory_usage)
     void insert(int32_t id, cached_beatmap btm);
 
@@ -35,3 +33,12 @@ namespace hanaru {
 }
 
 #endif
+
+namespace hanaru {
+
+    // Load's values from config.json
+    void initialize();
+
+    // Returns true if available space is more than 0
+    bool can_write();
+}

@@ -28,6 +28,16 @@ after reaching `preferred_memory_usage` cache system starts to remove more recen
 if default timeout was 20 minutes, in 'preferred' mode it become 10 minutes (divided by 2)<br>
 after reaching `max_memory_usage` cache system doesn't accept beatmaps anymore until memory usage doesn't become lower than `preferred_memory_usage`, and beatmap timeout become 5 minutes if default timeout was 20 (divided by 4)
 
+
+hanaru also allows you to specify amount of required free space on hard drive
+```json
+"required_free_space": 5120 // In megabytes
+```
+by default `required_free_space` is 5 GB, which optimal for HDD, but might be low if you running this on SDD (o.o)<br>
+minimal is 1 GB (or 1024), because drogon can left some other stuff in `uploads` folder<br>
+please note that this value cannot be precisely verified, as this will decrease performance, so check runs every minute<br>
+so leave at least around 500 mb above your limit, just in case
+
 # Compatability
 hanaru fully copies [Aru's][3] json structure<br>
 also hanaru can be used with same database as uses [shiro][4]

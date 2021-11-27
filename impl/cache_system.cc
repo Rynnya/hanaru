@@ -1,8 +1,12 @@
-#ifdef HANARU_CACHE
-
 #include "cache_system.h"
 
 #include <drogon/HttpAppFramework.h>
+
+#include <filesystem>
+
+bool allowed_to_write = true;
+
+#ifdef HANARU_CACHE
 
 #include <shared_mutex>
 
@@ -10,6 +14,8 @@ int32_t preferred_memory_usage = 2048; // 2 GB
 int32_t max_memory_usage = 4096; // 4 GB
 
 int32_t beatmap_timeout = 1200; // 20 minutes
+
+int32_t required_free_space = 5120; // 5 GB
 
 std::shared_mutex mtx;
 std::atomic_int64_t total_memory_usage;
@@ -46,7 +52,17 @@ void hanaru::initialize() {
         }
     }
 
+    if (config["required_free_space"].isIntegral()) {
+        required_free_space = config["required_free_space"].asInt64();
+        if (required_free_space < 1024) {
+            required_free_space = 1024;
+        }
+    }
+
     drogon::app().getIOLoop(1)->runEvery(60, [&]() {
+
+        std::filesystem::space_info sp = std::filesystem::space(".");
+        allowed_to_write = (((sp.available >> 20) - required_free_space) > 0);
 
         std::unique_lock<std::shared_mutex> lock(mtx);
         auto it = cache.begin();
@@ -100,4 +116,26 @@ std::optional<hanaru::cached_beatmap> hanaru::get(int32_t id) {
     return {};
 }
 
+#else
+
+void hanaru::initialize() {
+    Json::Value config = drogon::app().getCustomConfig();
+
+    if (config["required_free_space"].isIntegral()) {
+        required_free_space = config["required_free_space"].asInt64();
+        if (required_free_space < 1024) {
+            required_free_space = 1024;
+        }
+    }
+
+    drogon::app().getIOLoop(1)->runEvery(60, [&]() {
+        std::filesystem::space_info sp = std::filesystem::space(".");
+        allowed_to_write = (((sp.available >> 20) - required_free_space) > 0);
+    });
+}
+
 #endif
+
+bool hanaru::can_write() {
+    return allowed_to_write;
+}
