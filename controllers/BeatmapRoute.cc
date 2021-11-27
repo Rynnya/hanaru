@@ -36,30 +36,23 @@ void BeatmapRoute::get(const HttpRequestPtr& req, std::function<void(const HttpR
     beatmap["bpm"]              = row["bpm"].as<int32_t>();
     beatmap["hit_length"]       = row["hit_length"].as<int32_t>();
 
-    Json::Value diffs;
-    diffs["difficulty_std"]     = row["difficulty_std"].as<float>();
-    diffs["difficulty_taiko"]   = row["difficulty_taiko"].as<float>();
-    diffs["difficulty_ctb"]     = row["difficulty_ctb"].as<float>();
-    diffs["difficulty_mania"]   = row["difficulty_mania"].as<float>();
-    beatmap["difficulties"] = diffs;
-
     const int32_t mode = row["mode"].as<int32_t>();
     switch (mode) {
         default:
         case 0: {
-            beatmap["difficulty"] = beatmap["difficulties"]["difficulty_std"];
+            beatmap["difficulty"] = row["difficulty_std"].as<float>();
             break;
         }
         case 1: {
-            beatmap["difficulty"] = beatmap["difficulties"]["difficulty_taiko"];
+            beatmap["difficulty"] = row["difficulty_taiko"].as<float>();
             break;
         }
         case 2: {
-            beatmap["difficulty"] = beatmap["difficulties"]["difficulty_ctb"];
+            beatmap["difficulty"] = row["difficulty_ctb"].as<float>();
             break;
         }
         case 3: {
-            beatmap["difficulty"] = beatmap["difficulties"]["difficulty_mania"];
+            beatmap["difficulty"] = row["difficulty_mania"].as<float>();
             break;
         }
     }

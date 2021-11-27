@@ -19,7 +19,7 @@ void defaultHandler(const HttpRequestPtr& req, std::function<void(const HttpResp
     auto response = drogon::HttpResponse::newHttpResponse();
     response->setContentTypeString("text/plain; charset=utf-8");
     response->setBody(
-        "hanaru v0.3\n"
+        "hanaru v0.4\n"
         #ifdef HANARU_CACHE
         "cache memory usage: " + std::to_string(hanaru::memory_usage()) + " mb's\n"
         #endif

@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS `beatmaps` (
 ) ENGINE=InnoDB AUTO_INCREMENT=0 DEFAULT CHARSET=utf8;
 
 CREATE TABLE IF NOT EXISTS `beatmaps_names` (
-    `id` int NOT NULL,
+    `id` int NOT NULL UNIQUE,
     `name` longtext NOT NULL
 ) ENGINE=InnoDB CHARSET=utf8;
 

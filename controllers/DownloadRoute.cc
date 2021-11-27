@@ -68,11 +68,11 @@ void init() {
     }
 
     client->enableCookies();
-    client->setUserAgent("hanaru/0.3");
+    client->setUserAgent("hanaru/0.4");
 
     HttpClientPtr login_client = HttpClient::newHttpClient("https://old.ppy.sh");
     login_client->enableCookies();
-    login_client->setUserAgent("hanaru/0.3");
+    login_client->setUserAgent("hanaru/0.4");
 
     HttpRequestPtr login_request = HttpRequest::newHttpFormPostRequest();
     login_request->setPath("/forum/ucp.php?mode=login");

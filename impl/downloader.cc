@@ -30,7 +30,7 @@ std::tuple<Json::Value, drogon::HttpStatusCode> hanaru::download_beatmap(int32_t
     }
 
     drogon::HttpClientPtr client = drogon::HttpClient::newHttpClient("https://osu.ppy.sh");
-    client->setUserAgent("hanaru/0.3");
+    client->setUserAgent("hanaru/0.4");
 
     drogon::HttpRequestPtr request = drogon::HttpRequest::newHttpRequest();
     request->setPath("/api/get_beatmaps");
@@ -105,7 +105,7 @@ std::tuple<Json::Value, drogon::HttpStatusCode> hanaru::download_beatmap(int32_t
                 beatmap["beatmap_md5"]      = row["beatmap_md5"].asString();
                 beatmap["artist"]           = row["artist"].asString();
                 beatmap["title"]            = row["title"].asString();
-                beatmap["version"]          = row["difficulty_name"].asString();
+                beatmap["version"]          = row["version"].asString();
                 beatmap["creator"]          = row["creator"].asString();
                 beatmap["count_normal"]     = std::stoi(row["count_normal"].asString());
                 beatmap["count_slider"]     = std::stoi(row["count_slider"].asString());
@@ -142,7 +142,7 @@ std::tuple<Json::Value, drogon::HttpStatusCode> hanaru::download_beatmapset(int3
     }
 
     drogon::HttpClientPtr client = drogon::HttpClient::newHttpClient("https://osu.ppy.sh");
-    client->setUserAgent("hanaru/0.1");
+    client->setUserAgent("hanaru/0.4");
 
     drogon::HttpRequestPtr request = drogon::HttpRequest::newHttpRequest();
     request->setPath("/api/get_beatmaps");
@@ -213,7 +213,7 @@ std::tuple<Json::Value, drogon::HttpStatusCode> hanaru::download_beatmapset(int3
                     beatmap["beatmap_md5"]      = row["beatmap_md5"].asString();
                     beatmap["artist"]           = row["artist"].asString();
                     beatmap["title"]            = row["title"].asString();
-                    beatmap["version"]          = row["difficulty_name"].asString();
+                    beatmap["version"]          = row["version"].asString();
                     beatmap["creator"]          = row["creator"].asString();
                     beatmap["count_normal"]     = std::stoi(row["count_normal"].asString());
                     beatmap["count_slider"]     = std::stoi(row["count_slider"].asString());
