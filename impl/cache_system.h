@@ -28,9 +28,6 @@ namespace hanaru {
     // Load's values from config.json
     void initialize();
 
-    // Run's internal cleaner
-    void run_cleaner();
-
     // Insert's new beatmap into cache (if total_memory_usage is lower than max_memory_usage)
     void insert(int32_t id, cached_beatmap btm);
 
