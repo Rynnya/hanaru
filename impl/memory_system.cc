@@ -1,4 +1,4 @@
-#include "cache_system.h"
+#include "memory_system.hh"
 
 #include <drogon/HttpAppFramework.h>
 
@@ -18,12 +18,12 @@ int32_t beatmap_timeout = 1200; // 20 minutes
 int32_t required_free_space = 5120; // 5 GB
 
 std::shared_mutex mtx;
-std::atomic_int64_t total_memory_usage;
-std::unordered_map<int32_t, hanaru::cached_beatmap> cache = {};
+std::atomic_int64_t total_memory_usage = 0;
+std::unordered_map<int32_t, hanaru::cache::cached_beatmap> internal_cache = {};
 
 std::atomic_bool memory_threshold = false;
 
-int64_t hanaru::memory_usage() {
+int64_t hanaru::cache::memory_usage() {
     // Convert raw bytes to megabytes
     return total_memory_usage >> 20;
 }
@@ -65,10 +65,10 @@ void hanaru::initialize() {
         allowed_to_write = (((sp.available >> 20) - required_free_space) > 0);
 
         std::unique_lock<std::shared_mutex> lock(mtx);
-        auto it = cache.begin();
-        while (it != cache.end()) {
+        auto it = internal_cache.begin();
+        while (it != internal_cache.end()) {
             int64_t expire = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - it->second.timestamp).count();
-            int64_t timeout = (preferred_memory_usage > memory_usage()) ? beatmap_timeout : beatmap_timeout >> 1;
+            int64_t timeout = (preferred_memory_usage > cache::memory_usage()) ? beatmap_timeout : beatmap_timeout >> 1;
 
             if (memory_threshold) { // Protective mode enabled, we should cleanup memory as fast as we can
                 timeout >>= 1;
@@ -76,7 +76,7 @@ void hanaru::initialize() {
 
             if (expire > timeout) {
                 total_memory_usage -= it->second.content.size();
-                it = cache.erase(it);
+                it = internal_cache.erase(it);
                 continue;
             }
 
@@ -87,7 +87,7 @@ void hanaru::initialize() {
 }
 
 
-void hanaru::insert(int32_t id, hanaru::cached_beatmap btm) {
+void hanaru::cache::insert(int32_t id, hanaru::cache::cached_beatmap btm) {
     // Cache enters protective mode where memory should be cleaned
     if (memory_usage() > max_memory_usage) {
         memory_threshold = true;
@@ -102,15 +102,15 @@ void hanaru::insert(int32_t id, hanaru::cached_beatmap btm) {
     total_memory_usage += btm.content.size();
 
     std::unique_lock<std::shared_mutex> lock(mtx);
-    cache.emplace(id, btm);
+    internal_cache.emplace(id, btm);
 }
 
-std::optional<hanaru::cached_beatmap> hanaru::get(int32_t id) {
+std::optional<hanaru::cache::cached_beatmap> hanaru::cache::get(int32_t id) {
     std::shared_lock<std::shared_mutex> lock(mtx);
-    auto it = cache.find(id);
+    auto it = internal_cache.find(id);
 
-    if (it != cache.end()) {
-        return std::make_optional<hanaru::cached_beatmap>(it->second);
+    if (it != internal_cache.end()) {
+        return std::make_optional<hanaru::cache::cached_beatmap>(it->second);
     }
 
     return {};
@@ -136,6 +136,6 @@ void hanaru::initialize() {
 
 #endif
 
-bool hanaru::can_write() {
+bool hanaru::storage::can_write() {
     return allowed_to_write;
 }

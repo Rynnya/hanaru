@@ -1,6 +1,8 @@
-#include "DownloadRoute.h"
+#include "download_route.hh"
 
-#include "../impl/cache_system.h"
+#include "../impl/globals.hh"
+#include "../impl/memory_system.hh"
+#include "../impl/rate_limiter.hh"
 
 #include <drogon/HttpClient.h>
 #include <drogon/utils/Utilities.h>
@@ -15,21 +17,10 @@ const std::string empty_beatmap = "";
 const char* filename_insert_query = "INSERT INTO beatmaps_names (id, name) VALUES (?, ?);";
 const char* filename_select_query = "SELECT name FROM beatmaps_names WHERE id = ? LIMIT 1;";
 
-#define SEND_ERROR(CALLBACK, STATUS_CODE, BODY)                                                         \
-    {                                                                                                   \
-        HttpResponsePtr response = HttpResponse::newHttpResponse();                                     \
-        response->setStatusCode(STATUS_CODE);                                                           \
-        response->setBody(BODY);                                                                        \
-        response->setContentTypeString("text/plain; charset=utf-8");                                    \
-        CALLBACK(response);                                                                             \
-        return;                                                                                         \
-    }
-
 namespace fs = std::filesystem;
 fs::path beatmap_path = fs::current_path() / "beatmaps";
 
 bool enable_downloading = false;
-std::atomic_uint32_t limiter = 0;
 
 HttpClientPtr client = HttpClient::newHttpClient("https://osu.ppy.sh");
 
@@ -49,12 +40,6 @@ void init() {
 
     hanaru::initialize();
 
-    app().getIOLoop(1)->runEvery(10, [&]() {
-        if (limiter > 0) {
-            limiter--;
-        }
-    });
-
     Json::Value custom_cfg = app().getCustomConfig();
     if (!custom_cfg["osu_username"].isString() || !custom_cfg["osu_password"].isString()) {
         return;
@@ -68,11 +53,11 @@ void init() {
     }
 
     client->enableCookies();
-    client->setUserAgent("hanaru/0.4");
+    client->setUserAgent("hanaru/0.5");
 
     HttpClientPtr login_client = HttpClient::newHttpClient("https://old.ppy.sh");
     login_client->enableCookies();
-    login_client->setUserAgent("hanaru/0.4");
+    login_client->setUserAgent("hanaru/0.5");
 
     HttpRequestPtr login_request = HttpRequest::newHttpFormPostRequest();
     login_request->setPath("/forum/ucp.php?mode=login");
@@ -109,6 +94,9 @@ void init() {
 }
 
 void DownloadRoute::get(const HttpRequestPtr& req, std::function<void(const HttpResponsePtr&)>&& callback, int32_t id) {
+    if (!hanaru::rate_limit::consume(1)) {
+        SEND_ERROR(callback, k429TooManyRequests, "rate limit, please try again");
+    }
 
     // Initialize user client
     static std::once_flag once;
@@ -117,22 +105,26 @@ void DownloadRoute::get(const HttpRequestPtr& req, std::function<void(const Http
     auto db = app().getDbClient();
     const std::string id_as_string = std::to_string(id);
 
-#ifdef HANARU_CACHE
-    std::optional<hanaru::cached_beatmap> cached = hanaru::get(id);
-    if (cached.has_value()) {
-        HttpResponsePtr response = HttpResponse::newFileResponse(
-            reinterpret_cast<const unsigned char*>(cached->content.data()),
-            cached->content.size(),
-            cached->name,
-            CT_CUSTOM,
-            "application/x-osu-beatmap-archive"
-        );
-        callback(response);
-        return;
-    }
-#endif
+    #ifdef HANARU_CACHE
+        std::optional<hanaru::cache::cached_beatmap> cached = hanaru::cache::get(id);
+        if (cached.has_value()) {
+            HttpResponsePtr response = HttpResponse::newFileResponse(
+                reinterpret_cast<const unsigned char*>(cached->content.data()),
+                cached->content.size(),
+                cached->name,
+                CT_CUSTOM,
+                "application/x-osu-beatmap-archive"
+            );
+            callback(response);
+            return;
+        }
+    #endif
 
     const fs::path beatmap = beatmap_path / id_as_string;
+
+    if (!hanaru::rate_limit::consume(20)) {
+        SEND_ERROR(callback, k429TooManyRequests, "rate limit, please wait 3 seconds");
+    }
 
     // Trying to find on disk
     if (fs::exists(beatmap)) {
@@ -147,9 +139,11 @@ void DownloadRoute::get(const HttpRequestPtr& req, std::function<void(const Http
 
         // Beatmap doesn't exist on server, but we cache it to reduce activity to osu! servers
         if (contents.empty()) {
-#ifdef HANARU_CACHE
-            hanaru::insert(id, hanaru::cached_beatmap("", empty_beatmap.data(), empty_beatmap.size()));
-#endif
+
+            #ifdef HANARU_CACHE
+                hanaru::cache::insert(id, hanaru::cache::cached_beatmap("", empty_beatmap.data(), empty_beatmap.size()));
+            #endif
+
             SEND_ERROR(callback, k404NotFound, "beatmapset doesn't exist on osu! servers");
         }
 
@@ -160,9 +154,9 @@ void DownloadRoute::get(const HttpRequestPtr& req, std::function<void(const Http
             filename = row["name"].as<std::string>();
         }
 
-#ifdef HANARU_CACHE
-        hanaru::insert(id, hanaru::cached_beatmap(filename, contents.data(), contents.size()));
-#endif
+        #ifdef HANARU_CACHE
+            hanaru::cache::insert(id, hanaru::cache::cached_beatmap(filename, contents.data(), contents.size()));
+        #endif
 
         HttpResponsePtr response = HttpResponse::newFileResponse(
             reinterpret_cast<const unsigned char*>(contents.data()),
@@ -180,11 +174,9 @@ void DownloadRoute::get(const HttpRequestPtr& req, std::function<void(const Http
         SEND_ERROR(callback, k423Locked, "downloading disabled");
     }
 
-    if (limiter > 20) {
-        SEND_ERROR(callback, k429TooManyRequests, "rate limit, please wait 10 seconds");
+    if (!hanaru::rate_limit::consume(40)) {
+        SEND_ERROR(callback, k429TooManyRequests, "rate limit, please wait 6 seconds");
     }
-
-    limiter++;
 
     // Beatmapset wasn't found anywhere, so we download it
     HttpRequestPtr request = HttpRequest::newHttpRequest();
@@ -211,9 +203,9 @@ void DownloadRoute::get(const HttpRequestPtr& req, std::function<void(const Http
                 beatmap_file.open(beatmap);
                 beatmap_file.close();
 
-#ifdef HANARU_CACHE
-                hanaru::insert(id, hanaru::cached_beatmap("", empty_beatmap.data(), empty_beatmap.size()));
-#endif
+                #ifdef HANARU_CACHE
+                    hanaru::cache::insert(id, hanaru::cache::cached_beatmap("", empty_beatmap.data(), empty_beatmap.size()));
+                #endif
             }
 
             SEND_ERROR(callback, k404NotFound, "beatmapset doesn't exist on osu! servers");
@@ -242,11 +234,11 @@ void DownloadRoute::get(const HttpRequestPtr& req, std::function<void(const Http
             "application/x-osu-beatmap-archive"
         );
 
-#ifdef HANARU_CACHE
-        hanaru::insert(id, hanaru::cached_beatmap(filename, view.data(), view.size()));
-#endif
+        #ifdef HANARU_CACHE
+            hanaru::cache::insert(id, hanaru::cache::cached_beatmap(filename, view.data(), view.size()));
+        #endif
 
-        if (hanaru::can_write()) {
+        if (hanaru::storage::can_write()) {
             db->execSqlAsync(
                 filename_insert_query,
                 [](const orm::Result&) {},

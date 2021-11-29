@@ -22,16 +22,19 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(${PROJECT_NAME}
-    controllers/BeatmapRoute.cc
-    controllers/BeatmapRoute.h
-    controllers/BeatmapSetRoute.cc
-    controllers/BeatmapSetRoute.h
-    controllers/DownloadRoute.cc
-    controllers/DownloadRoute.h
-    impl/cache_system.cc
-    impl/cache_system.h
+    controllers/beatmap_route.cc
+    controllers/beatmap_route.hh
+    controllers/beatmap_set_route.cc
+    controllers/beatmap_set_route.hh
+    controllers/download_route.cc
+    controllers/download_route.hh
     impl/downloader.cc
-    impl/downloader.h
+    impl/downloader.hh
+    impl/globals.hh
+    impl/memory_system.cc
+    impl/memory_system.hh
+    impl/rate_limiter.cc
+    impl/rate_limiter.hh
     main.cc
 )
 

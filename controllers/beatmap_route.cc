@@ -1,14 +1,24 @@
-#include "BeatmapRoute.h"
+#include "beatmap_route.hh"
 
-#include "../impl/downloader.h"
+#include "../impl/globals.hh"
+#include "../impl/downloader.hh"
+#include "../impl/rate_limiter.hh"
 
 void BeatmapRoute::get(const HttpRequestPtr& req, std::function<void(const HttpResponsePtr&)>&& callback, int32_t id) {
+    if (!hanaru::rate_limit::consume(1)) {
+        SEND_ERROR(callback, k429TooManyRequests, "rate limit, please try again");
+    }
+
     auto db = app().getDbClient();
 
     const orm::Result& result = db->execSqlSync("SELECT * FROM beatmaps WHERE beatmap_id = ? LIMIT 1", id);
     Json::Value beatmap;
 
     if (result.empty()) {
+        if (!hanaru::rate_limit::consume(10)) {
+            SEND_ERROR(callback, k429TooManyRequests, "rate limit, please wait 1 second");
+        }
+
         auto [body, status] = hanaru::download_beatmap(id);
         auto response = HttpResponse::newHttpJsonResponse(body);
         response->setStatusCode(status);

@@ -42,6 +42,13 @@ so leave at least around 500 mb above your limit, just in case
 hanaru fully copies [Aru's][3] json structure<br>
 also hanaru can be used with same database as uses [shiro][4]
 
+# Rate limiting
+hanaru uses token bucket system to rate limit requests, with 600 tokens and refresh rate at 10 tokens per second<br>
+`/s/` and `/b/` routes consumes 1 token if data in database, and 11 if it downloaded from osu! servers (which will upper limit of osu! API tokens)<br>
+`/d/` route consumes 1 token if data in cache, 21 token if data loaded from disk and 61 token if data loaded from osu! server
+
+please note that this rate limit works for the entire system, so if you download a lot of maps, only `/s/` and `/b/` routes will be available
+
 # Error handling
 hanaru allow you to don't worry about huge and unrelated error handling systems<br>
 for example, if everything good in /d/ route, then you will get osz file and 200 response<br>

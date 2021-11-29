@@ -8,7 +8,7 @@
 #include <string>
 #include <optional>
 
-namespace hanaru {
+namespace hanaru::cache {
 
     class cached_beatmap {
     public:
@@ -39,6 +39,10 @@ namespace hanaru {
     // Load's values from config.json
     void initialize();
 
-    // Returns true if available space is more than 0
-    bool can_write();
+    namespace storage {
+
+        // Returns true if available space is more than 0
+        bool can_write();
+    }
+
 }

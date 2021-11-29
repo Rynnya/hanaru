@@ -1,13 +1,13 @@
 #include <drogon/drogon.h>
 
-#include "impl/downloader.h"
-#include "impl/cache_system.h"
+#include "impl/downloader.hh"
+#include "impl/memory_system.hh"
 
-#include "controllers/BeatmapRoute.h"
-#include "controllers/BeatmapSetRoute.h"
-#include "controllers/DownloadRoute.h"
+#include "controllers/beatmap_route.hh"
+#include "controllers/beatmap_set_route.hh"
+#include "controllers/download_route.hh"
 
-drogon::HttpResponsePtr errorHandler(drogon::HttpStatusCode code) {
+drogon::HttpResponsePtr error_handler(drogon::HttpStatusCode code) {
     auto response = drogon::HttpResponse::newHttpResponse();
     response->setContentTypeString("text/plain; charset=utf-8");
     response->setBody("unhandled error, don't worry, be happy :)");
@@ -15,32 +15,35 @@ drogon::HttpResponsePtr errorHandler(drogon::HttpStatusCode code) {
     return response;
 };
 
-void defaultHandler(const HttpRequestPtr& req, std::function<void(const HttpResponsePtr &)>&& callback) {
+void default_handler(const HttpRequestPtr& req, std::function<void(const HttpResponsePtr &)>&& callback) {
     auto response = drogon::HttpResponse::newHttpResponse();
     response->setContentTypeString("text/plain; charset=utf-8");
     response->setBody(
-        "hanaru v0.4\n"
+        "hanaru v0.5\n"
         #ifdef HANARU_CACHE
-        "cache memory usage: " + std::to_string(hanaru::memory_usage()) + " mb's\n"
+        "cache memory usage: " + std::to_string(hanaru::cache::memory_usage()) + " mb's\n"
         #endif
         "source code: https://github.com/Rynnya/hanaru"
     );
     callback(response);
 };
 
+void favicon_handler(const HttpRequestPtr& req, std::function<void(const HttpResponsePtr &)>&& callback) {
+    HttpResponsePtr response = HttpResponse::newHttpResponse();
+    response->setStatusCode(k204NoContent);
+    response->setBody("");
+    callback(response);
+}
+
 int main() {
 
     drogon::app()
         .addListener("0.0.0.0", 8090)
-        .setCustomErrorHandler(errorHandler)
-        .setDefaultHandler(defaultHandler)
-        .registerHandler("/favicon.ico", [](const HttpRequestPtr& req, std::function<void(const HttpResponsePtr &)>&& callback) {
-            HttpResponsePtr response = HttpResponse::newHttpResponse();
-            response->setStatusCode(k204NoContent);
-            response->setBody("");
-            callback(response);
-        })
+        .setCustomErrorHandler(error_handler)
+        .setDefaultHandler(default_handler)
+        .registerHandler("/favicon.ico", &favicon_handler)
         .loadConfigFile("config.json");
+
     hanaru::initialize_client();
     drogon::app().run();
 

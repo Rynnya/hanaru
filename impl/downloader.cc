@@ -1,4 +1,4 @@
-#include "downloader.h"
+#include "downloader.hh"
 
 #include <drogon/HttpAppFramework.h>
 #include <drogon/HttpClient.h>
@@ -30,7 +30,7 @@ std::tuple<Json::Value, drogon::HttpStatusCode> hanaru::download_beatmap(int32_t
     }
 
     drogon::HttpClientPtr client = drogon::HttpClient::newHttpClient("https://osu.ppy.sh");
-    client->setUserAgent("hanaru/0.4");
+    client->setUserAgent("hanaru/0.5");
 
     drogon::HttpRequestPtr request = drogon::HttpRequest::newHttpRequest();
     request->setPath("/api/get_beatmaps");
@@ -142,7 +142,7 @@ std::tuple<Json::Value, drogon::HttpStatusCode> hanaru::download_beatmapset(int3
     }
 
     drogon::HttpClientPtr client = drogon::HttpClient::newHttpClient("https://osu.ppy.sh");
-    client->setUserAgent("hanaru/0.4");
+    client->setUserAgent("hanaru/0.5");
 
     drogon::HttpRequestPtr request = drogon::HttpRequest::newHttpRequest();
     request->setPath("/api/get_beatmaps");
