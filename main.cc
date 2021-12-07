@@ -1,11 +1,10 @@
 #include <drogon/drogon.h>
 
 #include "impl/downloader.hh"
-#include "impl/memory_system.hh"
+#include "impl/globals.hh"
+#include "impl/storage_manager.hh"
 
-#include "controllers/beatmap_route.hh"
-#include "controllers/beatmap_set_route.hh"
-#include "controllers/download_route.hh"
+#include "controllers/subscribe_route.hh"
 
 drogon::HttpResponsePtr error_handler(drogon::HttpStatusCode code) {
     auto response = drogon::HttpResponse::newHttpResponse();
@@ -15,22 +14,20 @@ drogon::HttpResponsePtr error_handler(drogon::HttpStatusCode code) {
     return response;
 };
 
-void default_handler(const HttpRequestPtr& req, std::function<void(const HttpResponsePtr &)>&& callback) {
+void default_handler(const drogon::HttpRequestPtr& req, std::function<void(const drogon::HttpResponsePtr &)>&& callback) {
     auto response = drogon::HttpResponse::newHttpResponse();
     response->setContentTypeString("text/plain; charset=utf-8");
     response->setBody(
-        "hanaru v0.5\n"
-        #ifdef HANARU_CACHE
-        "cache memory usage: " + std::to_string(hanaru::cache::memory_usage()) + " mb's\n"
-        #endif
+        "hanaru v" HANARU_VERSION "\n"
+        "cache memory usage: " + std::to_string(hanaru::storage_manager::get()->memory_usage()) + " mb's\n"
         "source code: https://github.com/Rynnya/hanaru"
     );
     callback(response);
 };
 
-void favicon_handler(const HttpRequestPtr& req, std::function<void(const HttpResponsePtr &)>&& callback) {
-    HttpResponsePtr response = HttpResponse::newHttpResponse();
-    response->setStatusCode(k204NoContent);
+void favicon_handler(const drogon::HttpRequestPtr& req, std::function<void(const drogon::HttpResponsePtr &)>&& callback) {
+    drogon::HttpResponsePtr response = drogon::HttpResponse::newHttpResponse();
+    response->setStatusCode(drogon::k204NoContent);
     response->setBody("");
     callback(response);
 }
@@ -44,7 +41,25 @@ int main() {
         .registerHandler("/favicon.ico", &favicon_handler)
         .loadConfigFile("config.json");
 
-    hanaru::initialize_client();
+    if (!fs::exists(hanaru::beatmap_path)) {
+        fs::create_directory(hanaru::beatmap_path);
+    }
+
+    Json::Value custom_config = drogon::app().getCustomConfig();
+
+    hanaru::downloader dwn(
+        custom_config["osu_username"].asString(),
+        custom_config["osu_password"].asString(),
+        custom_config["osu_api_key"].asString()
+    );
+
+    hanaru::storage_manager sm(
+        custom_config["preferred_memory_usage"].asInt64(),
+        custom_config["max_memory_usage"].asInt64(),
+        custom_config["beatmap_timeout"].asInt64(),
+        custom_config["required_free_space"].asInt64()
+    );
+
     drogon::app().run();
 
     return 0;

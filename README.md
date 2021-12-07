@@ -1,6 +1,6 @@
 # hanaru
 
-hanaru provides minimal API to get beatmaps and metadata. Its based on [drogon][1], which makes it really fast.<br>
+hanaru provides minimal API to get beatmaps and metadata. It's based on [drogon][1], which makes it really fast.<br>
 It's also caches every beatmap that has been requested to provide work faster, and cache system can be adjusted in memory usage.
 <!-- TODO: Might add some test here? -->
 
@@ -10,15 +10,12 @@ hanaru cannot handle beatmaps with video, so if you want to download beatmapset 
 
 # Build
 
-hanaru only depends on drogon, which can be installed by following this [wiki][2]
+hanaru only depends on drogon, which can be installed by following this [wiki][2]<br>
+it requires g++10 (recommended 11 due to memory leak) or MSVC with C++20 and coroutines supports (CLang doesn't supported by drogon)
 
 # Optionals
 
-hanaru allows you to disable caching, but its very unlikely, as it will always read beatmaps from disk, which might be slow<br>
-```
--DHANARU_CACHE=ON
-```
-to counter this option you can specify `beatmapset_timeout`, `max_memory_usage` and `preferred_memory_usage` in `config.json`
+hanaru allows you to specify `beatmapset_timeout`, `max_memory_usage` and `preferred_memory_usage` in `config.json` in order to reduce memory usage
 ```json
 "preferred_memory_usage": 6144, // In megabytes, recommended value is `max_memory_usage` / 2
 "max_memory_usage": 8192, // In megabytes, please leave at least 2 gb for your system!
@@ -26,7 +23,7 @@ to counter this option you can specify `beatmapset_timeout`, `max_memory_usage` 
 ```
 after reaching `preferred_memory_usage` cache system starts to remove more recent beatmaps<br>
 if default timeout was 20 minutes, in 'preferred' mode it become 10 minutes (divided by 2)<br>
-after reaching `max_memory_usage` cache system doesn't accept beatmaps anymore until memory usage doesn't become lower than `preferred_memory_usage`, and beatmap timeout become 5 minutes if default timeout was 20 (divided by 4)
+after reaching `max_memory_usage` cache system doesn't accept beatmaps anymore until memory usage doesn't become lower than `max_memory_usage`, and beatmap timeout become 5 minutes if default timeout was 20 (divided by 4)
 
 
 hanaru also allows you to specify amount of required free space on hard drive
@@ -39,8 +36,12 @@ please note that this value cannot be precisely verified, as this will decrease 
 so leave at least around 500 mb above your limit, just in case
 
 # Compatability
-hanaru fully copies [Aru's][3] json structure<br>
+hanaru uses own JSON structure for `/s/` and `/b/` routes, which will be copied to [Aru][3] later
 also hanaru can be used with same database as uses [shiro][4]
+
+
+shiro can (currently not) connect to hanaru through websocket
+shiro should run on same machine (because of LocalHostFilter)
 
 # Rate limiting
 hanaru uses token bucket system to rate limit requests, with 600 tokens and refresh rate at 10 tokens per second<br>
@@ -51,7 +52,7 @@ please note that this rate limit works for the entire system, so if you download
 
 # Error handling
 hanaru allow you to don't worry about huge and unrelated error handling systems<br>
-for example, if everything good in /d/ route, then you will get osz file and 200 response<br>
+for example, if everything good in `/d/` route, then you will get osz file and 200 response<br>
 but if something gone wrong - status code will be 400 or 500<br>
 here's list of all exceptions:
 - 404 - beatmapset doesn't exist

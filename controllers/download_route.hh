@@ -2,11 +2,11 @@
 #include <drogon/HttpController.h>
 
 using namespace drogon;
-class DownloadRoute : public drogon::HttpController<DownloadRoute> {
+class download_route : public drogon::HttpController<download_route> {
 public:
-    void get(const HttpRequestPtr& req, std::function<void(const HttpResponsePtr&)>&& callback, int32_t id);
+    Task<HttpResponsePtr> get(HttpRequestPtr req, int32_t id);
 
     METHOD_LIST_BEGIN
-        ADD_METHOD_TO(DownloadRoute::get, "/d/{1}", Get);
+        ADD_METHOD_TO(download_route::get, "/d/{1}", Get);
     METHOD_LIST_END
 };

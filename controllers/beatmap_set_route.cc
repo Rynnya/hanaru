@@ -1,27 +1,26 @@
 #include "beatmap_set_route.hh"
 
-#include "../impl/globals.hh"
 #include "../impl/downloader.hh"
+#include "../impl/globals.hh"
 #include "../impl/rate_limiter.hh"
 
-void BeatmapSetRoute::get(const HttpRequestPtr& req, std::function<void(const HttpResponsePtr&)>&& callback, int32_t id) {
+Task<HttpResponsePtr> beatmap_set_route::get(HttpRequestPtr req, int32_t id) {
     if (!hanaru::rate_limit::consume(1)) {
-        SEND_ERROR(callback, k429TooManyRequests, "rate limit, please try again");
+        SEND_ERROR(k429TooManyRequests, "rate limit, please try again");
     }
 
     auto db = app().getDbClient();
 
-    const orm::Result& result = db->execSqlSync("SELECT * FROM beatmaps WHERE beatmapset_id = ?", id);
+    const orm::Result& result = co_await db->execSqlCoro("SELECT * FROM beatmaps WHERE beatmapset_id = ?", id);
     if (result.empty()) {
         if (!hanaru::rate_limit::consume(10)) {
-            SEND_ERROR(callback, k429TooManyRequests, "rate limit, please wait 1 second");
+            SEND_ERROR(k429TooManyRequests, "rate limit, please wait 1 second");
         }
 
-        auto [beatmaps, status] = hanaru::download_beatmapset(id);
+        const auto [beatmaps, status] = co_await hanaru::downloader::get()->download_beatmapset(id);
         auto response = HttpResponse::newHttpJsonResponse(beatmaps);
         response->setStatusCode(status);
-        callback(response);
-        return;
+        co_return response;
     }
 
     // Workaround for GCC
@@ -43,7 +42,7 @@ void BeatmapSetRoute::get(const HttpRequestPtr& req, std::function<void(const Ht
         beatmap["count_spinner"]    = row["count_spinner"].as<int32_t>();
         beatmap["max_combo"]        = row["max_combo"].as<int32_t>();
         beatmap["ranked_status"]    = row["ranked_status"].as<int32_t>();
-        beatmap["creating_date"]    = hanaru::int_to_time(row["creating_date"].as<int64_t>());
+        beatmap["latest_update"]    = hanaru::int_to_time(row["latest_update"].as<int64_t>());
         beatmap["bpm"]              = row["bpm"].as<int32_t>();
         beatmap["hit_length"]       = row["hit_length"].as<int32_t>();
 
@@ -78,5 +77,5 @@ void BeatmapSetRoute::get(const HttpRequestPtr& req, std::function<void(const Ht
     }
     
     auto response = HttpResponse::newHttpJsonResponse(beatmaps);
-    callback(response);
+    co_return response;
 }
