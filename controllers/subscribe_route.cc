@@ -17,7 +17,7 @@ void subscribe_route::handleNewMessage(const WebSocketConnectionPtr& ws_conn, st
         return;
     }
 
-    trantor::EventLoop::getEventLoopOfCurrentThread()->runInLoop(std::bind([](WebSocketConnectionPtr ws_conn, int32_t id) -> Task<void> {
+    trantor::EventLoop::getEventLoopOfCurrentThread()->runInLoop(std::bind([](WebSocketConnectionPtr ws_conn, int32_t id) -> AsyncTask {
         Json::Value response = Json::objectValue;
         try {
             auto [beatmap, status] = co_await hanaru::downloader::get()->download_beatmap(id);
@@ -32,10 +32,10 @@ void subscribe_route::handleNewMessage(const WebSocketConnectionPtr& ws_conn, st
 
             int32_t beatmapset_id = beatmap["beatmapset_id"].asInt();
             
-            auto [status_code, filename, data] = co_await hanaru::downloader::get()->download_map(beatmapset_id);
+            auto [status_code, filename, binary] = co_await hanaru::downloader::get()->download_map(beatmapset_id);
             response["id"] = id;
             response["status"] = static_cast<int32_t>(status_code);
-            response["data"] = data;
+            response["data"] = drogon::utils::base64Encode(reinterpret_cast<const unsigned char*>(binary.data()), binary.size());
             response["filename"] = filename;
             ws_conn->send(response.toStyledString(), WebSocketMessageType::Binary);
         }
