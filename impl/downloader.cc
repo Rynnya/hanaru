@@ -82,7 +82,7 @@ drogon::Task<std::tuple<Json::Value, drogon::HttpStatusCode>> hanaru::downloader
 
     if (json_response != nullptr) {
         Json::Value resp = *json_response;
-        Json::Value map = serialize_beatmap(*resp.begin());
+        Json::Value map = serialize_beatmap(resp[0]);
 
         if (map["beatmap_id"].isNumeric()) {
             co_return { map, drogon::k200OK };
@@ -283,6 +283,10 @@ const hanaru::downloader* hanaru::downloader::get() {
 }
 
 Json::Value hanaru::downloader::serialize_beatmap(const Json::Value& json) const {
+    if (json.isNull()) {
+        return {};
+    }
+
     std::string approved = "0";
     std::string max_combo = "0";
     drogon::orm::DbClientPtr db = drogon::app().getDbClient();
@@ -324,7 +328,7 @@ Json::Value hanaru::downloader::serialize_beatmap(const Json::Value& json) const
 
     // This is way safer to firstly apply beatmap to database, so we won't lose it if exception happends when casting strings
     db->execSqlAsync(
-        "INSERT INTO beatmaps (beatmap_id, beatmapset_id, beatmap_md5, mode, "
+        "INSERT IGNORE INTO beatmaps (beatmap_id, beatmapset_id, beatmap_md5, mode, "
         "artist, title, difficulty_name, creator, "
         "count_normal, count_slider, count_spinner, max_combo, "
         "ranked_status, creating_date, bpm, hit_length, "

@@ -35,7 +35,6 @@ void favicon_handler(const drogon::HttpRequestPtr& req, std::function<void(const
 int main() {
 
     drogon::app()
-        .addListener("0.0.0.0", 8090)
         .setCustomErrorHandler(error_handler)
         .setDefaultHandler(default_handler)
         .registerHandler("/favicon.ico", &favicon_handler)
@@ -59,6 +58,13 @@ int main() {
         custom_config["beatmap_timeout"].asInt64(),
         custom_config["required_free_space"].asInt64()
     );
+
+    std::thread([] {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        for (auto& listener : drogon::app().getListeners()) {
+            LOG_INFO << "Listening on " << listener.toIp() << ":" << listener.toPort();
+        }
+    }).detach();
 
     drogon::app().run();
 
