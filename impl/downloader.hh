@@ -19,6 +19,7 @@ namespace hanaru {
     private:
         Json::Value serialize_beatmap(const Json::Value& json) const;
         std::tuple<std::string, std::string, std::string> split_download_link(const std::string& link) const;
+        void authorization();
 
         const std::string username = "";
         const std::string password = "";

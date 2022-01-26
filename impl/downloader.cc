@@ -27,43 +27,10 @@ hanaru::downloader::downloader(const std::string& _username, const std::string& 
     }
 
     std::thread([&] {
-        drogon::HttpClientPtr login_client = drogon::HttpClient::newHttpClient("https://old.ppy.sh");
-        login_client->enableCookies();
-        login_client->setUserAgent("hanaru/" HANARU_VERSION);
-
-        drogon::HttpRequestPtr login_request = drogon::HttpRequest::newHttpFormPostRequest();
-        login_request->setPath("/forum/ucp.php?mode=login");
-
-        login_request->addHeader("Origin", "https://old.ppy.sh");
-        login_request->addHeader("Referer", "https://old.ppy.sh/forum/ucp.php?mode=login");
-        login_request->addHeader("Alt-Used", "old.ppy.sh");
-
-        login_request->setParameter("redirect", "/");
-        login_request->setParameter("sid", "");
-        login_request->setParameter("username", username);
-        login_request->setParameter("password", password);
-        login_request->setParameter("autologin", "on");
-        login_request->setParameter("login", "Login");
-
-        auto [__, response] = login_client->sendRequest(login_request);
-        const std::string& location = response->getHeader("Location");
-
-        if (location.find("success") == std::string::npos) {
-            LOG_WARN << "invalid location header: " << location;
-            instance = this;
-            return;
+        while (true) {
+            this->authorization();
+            std::this_thread::sleep_for(std::chrono::months(1));
         }
-
-        for (auto cookie : response->getCookies()) {
-            if (cookie.first == "Location") {
-                continue;
-            }
-
-            d_client->addCookie(cookie.second);
-        }
-
-        downloading_enabled = true;
-        instance = this;
     }).detach();
 }
 
@@ -387,4 +354,45 @@ std::tuple<std::string, std::string, std::string> hanaru::downloader::split_down
     filename = filename.substr(0, filename.find(".osz") + 4);
 
     return { std::string(link.begin(), link.begin() + ptr + 6), query, drogon::utils::urlDecode(filename) };
+}
+
+void hanaru::downloader::authorization() {
+    drogon::HttpClientPtr login_client = drogon::HttpClient::newHttpClient("https://old.ppy.sh");
+    login_client->enableCookies();
+    login_client->setUserAgent("hanaru/" HANARU_VERSION);
+
+    drogon::HttpRequestPtr login_request = drogon::HttpRequest::newHttpFormPostRequest();
+    login_request->setPath("/forum/ucp.php?mode=login");
+
+    login_request->addHeader("Origin", "https://old.ppy.sh");
+    login_request->addHeader("Referer", "https://old.ppy.sh/forum/ucp.php?mode=login");
+    login_request->addHeader("Alt-Used", "old.ppy.sh");
+
+    login_request->setParameter("redirect", "/");
+    login_request->setParameter("sid", "");
+    login_request->setParameter("username", this->username);
+    login_request->setParameter("password", this->password);
+    login_request->setParameter("autologin", "on");
+    login_request->setParameter("login", "Login");
+
+    auto [__, response] = login_client->sendRequest(login_request);
+    const std::string& location = response->getHeader("Location");
+
+    if (location.find("success") == std::string::npos) {
+        LOG_WARN << "invalid location header: " << location;
+        downloading_enabled = false;
+        instance = this;
+        return;
+    }
+
+    for (auto cookie : response->getCookies()) {
+        if (cookie.first == "Location") {
+            continue;
+        }
+
+        d_client->addCookie(cookie.second);
+    }
+
+    downloading_enabled = true;
+    instance = this;
 }
