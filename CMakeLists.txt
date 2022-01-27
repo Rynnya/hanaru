@@ -36,6 +36,7 @@ endif ()
 
 find_package(Drogon CONFIG REQUIRED)
 target_link_libraries(${PROJECT_NAME} PRIVATE Drogon::Drogon)
+include_directories(${JSONCPP_INCLUDE_DIRS})
 
 aux_source_directory(controllers CTL_SRC)
 

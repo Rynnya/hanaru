@@ -2,7 +2,6 @@
 
 hanaru provides minimal API to get beatmaps and metadata. It's based on [drogon][1], which makes it really fast.<br>
 It's also caches every beatmap that has been requested to provide work faster, and cache system can be adjusted in memory usage.
-<!-- TODO: Might add some test here? -->
 
 # Current limitations
 
@@ -35,10 +34,10 @@ please note that this value cannot be precisely verified, as this will decrease 
 so leave at least around 500 mb above your limit, just in case
 
 # Compatability
-hanaru uses own JSON structure for `/s/` and `/b/` routes, which will be copied to [Aru][3] later
+hanaru uses own JSON structure for `/s/` and `/b/` routes, which will be copied to [Aru][3] later<br>
 also hanaru can be used with same database as uses [shiro][4]
 
-shiro can connect to hanaru through websocket
+shiro can connect to hanaru through websocket<br>
 shiro should run on same machine (because of LocalHostFilter)
 
 # Rate limiting
