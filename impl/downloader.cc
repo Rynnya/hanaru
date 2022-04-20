@@ -208,6 +208,7 @@ drogon::Task<std::tuple<drogon::HttpStatusCode, std::string, std::string>> hanar
 
         drogon::HttpClientPtr download_client = drogon::HttpClient::newHttpClient(endpoint);
         drogon::HttpRequestPtr download_request = drogon::HttpRequest::newHttpRequest();
+        download_request->setPathEncode(false);
         download_request->setPath(query);
 
         auto beatmap_response = co_await download_client->sendRequestCoro(download_request);
