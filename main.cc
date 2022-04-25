@@ -6,17 +6,19 @@
 
 #include "controllers/subscribe_route.hh"
 
+#include <fstream>
+
 drogon::HttpResponsePtr error_handler(drogon::HttpStatusCode code) {
     auto response = drogon::HttpResponse::newHttpResponse();
-    response->setContentTypeString("text/plain; charset=utf-8");
-    response->setBody("unhandled error, don't worry, be happy :)");
+    response->setContentTypeCodeAndCustomString(CT_TEXT_PLAIN, "text/plain; charset=utf-8");
+    response->setBody("unhandled error");
     response->setStatusCode(code);
     return response;
 };
 
 void default_handler(const drogon::HttpRequestPtr& req, std::function<void(const drogon::HttpResponsePtr &)>&& callback) {
     auto response = drogon::HttpResponse::newHttpResponse();
-    response->setContentTypeString("text/plain; charset=utf-8");
+    response->setContentTypeCodeAndCustomString(CT_TEXT_PLAIN, "text/plain; charset=utf-8");
     response->setBody(
         "hanaru v" HANARU_VERSION "\n"
         "cache memory usage: " + std::to_string(hanaru::storage_manager::get()->memory_usage()) + " mb's\n"
@@ -32,9 +34,17 @@ void favicon_handler(const drogon::HttpRequestPtr& req, std::function<void(const
     callback(response);
 }
 
+void main_callback() {
+    for (auto& listener : drogon::app().getListeners()) {
+        LOG_INFO << "Listening on " << listener.toIp() << ":" << listener.toPort();
+    }
+}
+
 int main() {
 
     drogon::app()
+        .setFloatPrecisionInJson(2, "decimal")
+        .registerBeginningAdvice(main_callback)
         .setCustomErrorHandler(error_handler)
         .setDefaultHandler(default_handler)
         .registerHandler("/favicon.ico", &favicon_handler)
@@ -46,6 +56,13 @@ int main() {
 
     Json::Value custom_config = drogon::app().getCustomConfig();
 
+    std::ofstream log_file(fs::current_path() / "logs" / (hanaru::time_to_string(hanaru::time_from_epoch()) + ".log"));
+    trantor::Logger::setOutputFunction([&log_file](const char* msg, uint64_t length) {
+        log_file << std::string(msg, length);
+    }, [&log_file]() {
+        log_file.flush();
+    }, 7);
+
     hanaru::downloader dwn(
         custom_config["osu_username"].asString(),
         custom_config["osu_password"].asString(),
@@ -53,20 +70,11 @@ int main() {
     );
 
     hanaru::storage_manager sm(
-        custom_config["preferred_memory_usage"].asInt64(),
-        custom_config["max_memory_usage"].asInt64(),
-        custom_config["beatmap_timeout"].asInt64(),
-        custom_config["required_free_space"].asInt64()
+        custom_config["preferred_memory_usage"].asInt(),
+        custom_config["max_memory_usage"].asInt(),
+        custom_config["beatmap_timeout"].asInt(),
+        custom_config["required_free_space"].asInt()
     );
 
-    std::thread([] {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-        for (auto& listener : drogon::app().getListeners()) {
-            LOG_INFO << "Listening on " << listener.toIp() << ":" << listener.toPort();
-        }
-    }).detach();
-
     drogon::app().run();
-
-    return 0;
 }

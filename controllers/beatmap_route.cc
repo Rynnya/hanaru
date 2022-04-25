@@ -41,7 +41,7 @@ Task<HttpResponsePtr> beatmap_route::get(HttpRequestPtr req, int32_t id) {
     beatmap["count_spinner"]    = row["count_spinner"].as<int32_t>();
     beatmap["max_combo"]        = row["max_combo"].as<int32_t>();
     beatmap["ranked_status"]    = row["ranked_status"].as<int32_t>();
-    beatmap["latest_update"]    = hanaru::int_to_time(row["latest_update"].as<int64_t>());
+    beatmap["latest_update"]    = hanaru::time_to_string(row["latest_update"].as<int64_t>());
     beatmap["bpm"]              = row["bpm"].as<int32_t>();
     beatmap["hit_length"]       = row["hit_length"].as<int32_t>();
 

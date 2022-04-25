@@ -13,10 +13,9 @@ Task<HttpResponsePtr> download_route::get(HttpRequestPtr req, int32_t id) {
     HttpResponsePtr response = HttpResponse::newFileResponse(
         reinterpret_cast<const unsigned char*>(content.data()),
         content.size(),
-        filename,
-        CT_CUSTOM,
-        "application/x-osu-beatmap-archive"
+        filename
     );
+    response->setContentTypeCodeAndCustomString(drogon::CT_CUSTOM, "application/x-osu-beatmap-archive");
 
     co_return response;
 }

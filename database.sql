@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS `beatmaps` (
     `beatmap_md5` varchar(32) NOT NULL DEFAULT '',
     `artist` text NOT NULL,
     `title` text NOT NULL,
-    `difficulty_name` longtext NOT NULL,
+    `difficulty_name` text NOT NULL,
     `creator` text NOT NULL,
     `cs` float NOT NULL DEFAULT '0',
     `ar` float NOT NULL DEFAULT '0',
@@ -29,16 +29,15 @@ CREATE TABLE IF NOT EXISTS `beatmaps` (
     `play_count` int NOT NULL DEFAULT '0',
     `pass_count` int NOT NULL DEFAULT '0',
     `ranked_status` tinyint NOT NULL DEFAULT '0',
-    `latest_update` int NOT NULL DEFAULT '0',
+    `latest_update` bigint NOT NULL DEFAULT '0',
     `ranked_status_freezed` tinyint NOT NULL DEFAULT '0',
     `creating_date` bigint NOT NULL DEFAULT '0',
-    PRIMARY KEY (`id`),
-    KEY `id` (`id`)
+    PRIMARY KEY (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=0 DEFAULT CHARSET=utf8;
 
 CREATE TABLE IF NOT EXISTS `beatmaps_names` (
     `id` int NOT NULL UNIQUE,
-    `name` longtext NOT NULL
+    `name` text NOT NULL
 ) ENGINE=InnoDB CHARSET=utf8;
 
 -- Re-enables warning

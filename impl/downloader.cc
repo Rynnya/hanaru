@@ -26,10 +26,25 @@ hanaru::downloader::downloader(const std::string& _username, const std::string& 
         return;
     }
 
-    std::thread([&] {
+    std::thread([&]() -> drogon::AsyncTask {
+        this->authorization();
+        if (!downloading_enabled) {
+            co_return;
+        }
+
         while (true) {
-            this->authorization();
-            std::this_thread::sleep_for(std::chrono::months(1));
+            auto [code, body, error] = co_await this->download_map(rand() / 1300000);
+            if (code != drogon::k429TooManyRequests && code != drogon::k200OK) {
+                LOG_ERROR_TO(7) << "error happend when trying to verify downloader:";
+                LOG_ERROR_TO(7) << body;
+                LOG_ERROR_TO(7) << '\n';
+                LOG_ERROR_TO(7) << error;
+
+                downloading_enabled = false;
+                co_return;
+            }
+
+            std::this_thread::sleep_for(std::chrono::days(7));
         }
     }).detach();
 }
@@ -308,7 +323,7 @@ Json::Value hanaru::downloader::serialize_beatmap(const Json::Value& json) const
         json["beatmap_id"].asString(), json["beatmapset_id"].asString(), json["file_md5"].asString(), json["mode"].asString(),
         json["artist"].asString(), json["title"].asString(), json["version"].asString(), json["creator"].asString(),
         json["count_normal"].asString(), json["count_slider"].asString(), json["count_spinner"].asString(), max_combo,
-        approved, hanaru::time_to_int(json["last_update"]), json["bpm"].asString(), json["hit_length"].asString(),
+        approved, hanaru::string_to_time(json["last_update"]), json["bpm"].asString(), json["hit_length"].asString(),
         json["diff_size"].asString(), json["diff_approach"].asString(), json["diff_overall"].asString(), json["diff_drain"].asString(),
         std, taiko, ctb, mania
     );
@@ -358,39 +373,56 @@ std::tuple<std::string, std::string, std::string> hanaru::downloader::split_down
 }
 
 void hanaru::downloader::authorization() {
-    drogon::HttpClientPtr login_client = drogon::HttpClient::newHttpClient("https://old.ppy.sh");
+    drogon::HttpClientPtr login_client = drogon::HttpClient::newHttpClient("https://osu.ppy.sh");
     login_client->enableCookies();
     login_client->setUserAgent("hanaru/" HANARU_VERSION);
 
+    drogon::Cookie x_csrf_token;
+
+    {
+        drogon::HttpRequestPtr session_request = drogon::HttpRequest::newHttpRequest();
+        session_request->setPath("/home");
+
+        auto [_, response] = login_client->sendRequest(session_request, 10);
+        x_csrf_token = response->getCookie("x-csrf-token");
+        if (x_csrf_token.getValue().empty()) {
+            LOG_WARN << "x-csrf-token is empty, cannot perform login, downloading is disabled";
+            downloading_enabled = false;
+            instance = this;
+            return;
+        }
+    }
+
     drogon::HttpRequestPtr login_request = drogon::HttpRequest::newHttpFormPostRequest();
-    login_request->setPath("/forum/ucp.php?mode=login");
+    login_request->setPath("/session");
 
-    login_request->addHeader("Origin", "https://old.ppy.sh");
-    login_request->addHeader("Referer", "https://old.ppy.sh/forum/ucp.php?mode=login");
-    login_request->addHeader("Alt-Used", "old.ppy.sh");
+    login_request->addHeader("Origin", "https://osu.ppy.sh");
+    login_request->addHeader("Referer", "https://osu.ppy.sh/home");
+    login_request->addHeader("Alt-Used", "osu.ppy.sh");
+    login_request->addHeader("x-csrf-token", x_csrf_token.getValue());
+    login_request->addHeader("x-requested-with", "XMLHttpRequest");
 
-    login_request->setParameter("redirect", "/");
-    login_request->setParameter("sid", "");
+    login_request->setParameter("_token", x_csrf_token.getValue());
     login_request->setParameter("username", this->username);
     login_request->setParameter("password", this->password);
-    login_request->setParameter("autologin", "on");
-    login_request->setParameter("login", "Login");
 
-    auto [__, response] = login_client->sendRequest(login_request);
-    const std::string& location = response->getHeader("Location");
+    auto [_, response] = login_client->sendRequest(login_request);
 
-    if (location.find("success") == std::string::npos) {
-        LOG_WARN << "invalid location header: " << location;
+    if (response->getStatusCode() != drogon::k200OK) {
+        LOG_WARN_TO(7) << "invalid response from osu website:";
+        LOG_WARN_TO(7) << response->getStatusCode();
+        LOG_WARN_TO(7) << response->getBody();
+        LOG_WARN_TO(7) << '\n';
+        for (auto [key, value] : response->getHeaders()) {
+            LOG_WARN_TO(7) << key << " --- " << value;
+        }
+
         downloading_enabled = false;
         instance = this;
         return;
     }
 
     for (auto cookie : response->getCookies()) {
-        if (cookie.first == "Location") {
-            continue;
-        }
-
         d_client->addCookie(cookie.second);
     }
 

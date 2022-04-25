@@ -8,7 +8,7 @@
         HttpResponsePtr response = HttpResponse::newHttpResponse();                                     \
         response->setStatusCode(STATUS_CODE);                                                           \
         response->setBody(BODY);                                                                        \
-        response->setContentTypeString("text/plain; charset=utf-8");                                    \
+        response->setContentTypeCode(drogon::CT_TEXT_PLAIN);                                            \
         co_return response;                                                                             \
     }
 
@@ -21,23 +21,38 @@ namespace hanaru {
     inline const fs::path beatmap_path = fs::current_path() / "beatmaps";
     inline constexpr std::string_view empty = "";
 
-    inline int64_t time_to_int(Json::Value _time) {
-        if (!_time.isString()) {
-            return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now()).time_since_epoch().count();
-        }
-        std::string __time = _time.asString();
-        std::tm time {};
-        std::stringstream stream(__time);
-        stream >> std::get_time(&time, "%Y-%m-%d %H:%M:%S");
-        std::chrono::time_point time_point = std::chrono::system_clock::from_time_t(std::mktime(&time));
-        std::chrono::seconds seconds = std::chrono::time_point_cast<std::chrono::seconds>(time_point).time_since_epoch();
-        return seconds.count();
+    inline int64_t time_from_epoch() {
+        return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now()).time_since_epoch().count();
     }
 
-    inline std::string int_to_time(int64_t _time) {
-        std::tm time = *std::gmtime(&_time);
-        std::stringstream ss;
-        ss << std::put_time(&time, "%Y-%m-%d %H:%M:%S");
-        return ss.str();
+    inline int64_t string_to_time(Json::Value time_) {
+        if (!time_.isString()) {
+            return time_from_epoch();
+        }
+
+        return trantor::Date::fromDbStringLocal(time_.asString()).secondsSinceEpoch();
+    }
+
+    inline std::string time_to_string(int64_t time_) {
+        char buffer[128] = { 0 };
+        time_t seconds = static_cast<time_t>(time_);
+        struct tm tm_time;
+
+    #ifndef _WIN32
+            localtime_r(&seconds, &tm_time);
+    #else
+            localtime_s(&tm_time, &seconds);
+    #endif
+
+        snprintf(buffer, sizeof(buffer), "%4d-%02d-%02d %02d:%02d:%02d",
+            tm_time.tm_year + 1900,
+            tm_time.tm_mon + 1,
+            tm_time.tm_mday,
+            tm_time.tm_hour,
+            tm_time.tm_min,
+            tm_time.tm_sec
+        );
+
+        return buffer;
     }
 }
