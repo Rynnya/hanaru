@@ -34,11 +34,12 @@ hanaru::downloader::downloader(const std::string& _username, const std::string& 
 
         while (true) {
             auto [code, body, error] = co_await this->download_map(rand() / 1300000);
-            if (code != drogon::k429TooManyRequests && code != drogon::k200OK) {
-                LOG_ERROR_TO(7) << "error happend when trying to verify downloader:";
-                LOG_ERROR_TO(7) << body;
-                LOG_ERROR_TO(7) << '\n';
-                LOG_ERROR_TO(7) << error;
+            // Request might be denied due to rate limit or beatmap simply doesn't exist on this ID
+            if (code != drogon::k429TooManyRequests && code != drogon::k200OK && code != drogon::k404NotFound) {
+                LOG_ERROR << "error happend when trying to verify downloader:";
+                LOG_ERROR << body;
+                LOG_ERROR << '\n';
+                LOG_ERROR << error;
 
                 downloading_enabled = false;
                 co_return;
@@ -384,12 +385,17 @@ void hanaru::downloader::authorization() {
         session_request->setPath("/home");
 
         auto [_, response] = login_client->sendRequest(session_request, 10);
-        x_csrf_token = response->getCookie("x-csrf-token");
+
+        x_csrf_token = response->getCookie("XSRF-TOKEN");
         if (x_csrf_token.getValue().empty()) {
             LOG_WARN << "x-csrf-token is empty, cannot perform login, downloading is disabled";
             downloading_enabled = false;
             instance = this;
             return;
+        }
+
+        for (auto [key, cookie] : response->getCookies()) {
+            login_client->addCookie(cookie);
         }
     }
 
@@ -399,8 +405,7 @@ void hanaru::downloader::authorization() {
     login_request->addHeader("Origin", "https://osu.ppy.sh");
     login_request->addHeader("Referer", "https://osu.ppy.sh/home");
     login_request->addHeader("Alt-Used", "osu.ppy.sh");
-    login_request->addHeader("x-csrf-token", x_csrf_token.getValue());
-    login_request->addHeader("x-requested-with", "XMLHttpRequest");
+    login_request->addHeader("X-CSRF-Token", x_csrf_token.getValue());
 
     login_request->setParameter("_token", x_csrf_token.getValue());
     login_request->setParameter("username", this->username);
@@ -409,12 +414,11 @@ void hanaru::downloader::authorization() {
     auto [_, response] = login_client->sendRequest(login_request);
 
     if (response->getStatusCode() != drogon::k200OK) {
-        LOG_WARN_TO(7) << "invalid response from osu website:";
-        LOG_WARN_TO(7) << response->getStatusCode();
-        LOG_WARN_TO(7) << response->getBody();
-        LOG_WARN_TO(7) << '\n';
+        LOG_WARN << "invalid response from osu website:";
+        LOG_WARN << response->getStatusCode();
+        LOG_WARN << response->getBody();
         for (auto [key, value] : response->getHeaders()) {
-            LOG_WARN_TO(7) << key << " --- " << value;
+            LOG_WARN << key << " --- " << value;
         }
 
         downloading_enabled = false;

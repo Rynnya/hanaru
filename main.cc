@@ -56,13 +56,6 @@ int main() {
 
     Json::Value custom_config = drogon::app().getCustomConfig();
 
-    std::ofstream log_file(fs::current_path() / "logs" / (hanaru::time_to_string(hanaru::time_from_epoch()) + ".log"));
-    trantor::Logger::setOutputFunction([&log_file](const char* msg, uint64_t length) {
-        log_file << std::string(msg, length);
-    }, [&log_file]() {
-        log_file.flush();
-    }, 7);
-
     hanaru::downloader dwn(
         custom_config["osu_username"].asString(),
         custom_config["osu_password"].asString(),
