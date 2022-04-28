@@ -205,6 +205,12 @@ drogon::Task<std::tuple<drogon::HttpStatusCode, std::string, std::string>> hanar
 
         // If beatmap doesn't exist, then Location header will be empty
         const std::string& location = location_response->getHeader("Location");
+        const drogon::Cookie& csrf_token = location_response->getCookie("XSRF-TOKEN");
+
+        if (!csrf_token.value().empty()) {
+            d_client->addCookie(csrf_token);
+        }
+
         if (location.empty()) {
             // This will create empty file so we doesn't need to always ask peppy about this map
             // Some new maps might be added, so we should only apply this on old maps
@@ -222,12 +228,12 @@ drogon::Task<std::tuple<drogon::HttpStatusCode, std::string, std::string>> hanar
 
         auto [endpoint, query, filename] = this->split_download_link(location);
 
-        drogon::HttpClientPtr download_client = drogon::HttpClient::newHttpClient(endpoint);
         drogon::HttpRequestPtr download_request = drogon::HttpRequest::newHttpRequest();
         download_request->setPathEncode(false);
         download_request->setPath(query);
 
-        auto beatmap_response = co_await download_client->sendRequestCoro(download_request);
+        // 20 seconds must be enough to download almost any beatmap from osu! servers
+        auto beatmap_response = co_await d_client->sendRequestCoro(download_request, 20);
         std::string_view view = beatmap_response->getBody();
 
         // Verify 'magic' value for response
