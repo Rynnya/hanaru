@@ -39,6 +39,8 @@
 
 namespace detail {
 
+#ifdef _WIN32
+
     // https://stackoverflow.com/a/33542189
     char* strptime(const char* s, const char* f, struct tm* tm) {
         std::istringstream input(s);
@@ -58,6 +60,8 @@ namespace detail {
         memcpy(&my_tm, tm, sizeof(struct tm));
         return _mkgmtime(&my_tm);
     }
+
+#endif
 
     int64_t get_http_date(const std::string& http_string_date) {
         static const std::array<const char*, 4> formats = {
@@ -642,7 +646,7 @@ void curl::client::on_done(response& resp) {
 
     long status_code = 0;
     curl_easy_getinfo(handle_, CURLINFO_RESPONSE_CODE, &status_code);
-    resp.status_code = curl::status_code(status_code);
+    resp.code = curl::status_code(status_code);
 
     curl_slist_free_all(headers_list_);
     headers_list_ = nullptr;
@@ -651,7 +655,7 @@ void curl::client::on_done(response& resp) {
 }
 
 void curl::client::on_error(CURLcode code, response& resp) {
-    resp.status_code = status_code::values::failed;
+    resp.code = status_code::values::failed;
     resp.body = curl_easy_strerror(code);
 
     curl_slist_free_all(headers_list_);

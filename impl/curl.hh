@@ -105,69 +105,6 @@ namespace curl {
             custom_code = 999
         };
 
-        // Looks terrable, but allows to hold both values and functions in one class
-
-        using values::null;
-        using values::failed;
-
-        using values::ok;
-        using values::created;
-        using values::accepted;
-        using values::non_authoritative_information;
-        using values::no_content;
-        using values::reset_content;
-        using values::partial_content;
-
-        using values::multiple_chooses;
-        using values::moved_permanently;
-        using values::found;
-        using values::see_other;
-        using values::not_modified;
-        using values::temporary_redirect;
-        using values::permament_redirect;
-
-        using values::bad_request;
-        using values::unauthorized;
-        using values::payment_required;
-        using values::forbidden;
-        using values::not_found;
-        using values::method_not_allowed;
-        using values::not_acceptable;
-        using values::proxy_required;
-        using values::request_timeout;
-        using values::conflict;
-        using values::gone;
-        using values::length_required;
-        using values::precondition_failed;
-        using values::payload_too_large;
-        using values::url_too_long;
-        using values::unsupported_media_type;
-        using values::range_not_satisfiable;
-        using values::expectation_failed;
-        using values::im_a_teapot;
-        using values::unprocessable_entity;
-        using values::locked;
-        using values::too_early;
-        using values::upgrade_required;
-        using values::precondition_required;
-        using values::too_many_requests;
-        using values::request_header_fields_too_large;
-        using values::unavailable_for_legal_reasons;
-
-        using values::internal_server_error;
-        using values::not_implemented;
-        using values::bad_gateway;
-        using values::service_unavailable;
-        using values::gateway_timeout;
-        using values::version_not_supported;
-        using values::variant_also_negotiates;
-        using values::insufficient_storage;
-        using values::loop_detected;
-        using values::not_extended;
-        using values::network_auth_required;
-
-        using values::custom_code;
-        
         status_code(status_code::values value) noexcept;
         status_code(uint32_t value) noexcept;
 
@@ -226,7 +163,7 @@ namespace curl {
         // Returns true if write was successfully, otherwise false (or if overwrite was false and file already exist)
         bool save_to_file(const std::string& filename, bool overwrite = false);
 
-        status_code::values status_code = status_code::values::null;
+        status_code::values code = status_code::values::null;
         request_type type = request_type::get;
         std::unordered_multimap<std::string, std::string> headers {};
         std::unordered_multimap<std::string, cookie> cookies {};

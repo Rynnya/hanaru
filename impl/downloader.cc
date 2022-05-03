@@ -220,7 +220,7 @@ drogon::Task<std::tuple<drogon::HttpStatusCode, std::string, std::string>> hanar
     // Beatmapset wasn't found anywhere, so we download it
     curl::response beatmap_response = co_await send_request(id_as_string);
 
-    if (beatmap_response.status_code == curl::status_code::not_found) {
+    if (beatmap_response.code == curl::status_code::values::not_found) {
         std::ofstream beatmap_file;
         beatmap_file.open(beatmap_path);
         beatmap_file.close();
@@ -231,7 +231,7 @@ drogon::Task<std::tuple<drogon::HttpStatusCode, std::string, std::string>> hanar
         co_return { drogon::k404NotFound, "", "beatmapset doesn't exist on osu! servers or this beatmapset was banned" };
     }
 
-    if (beatmap_response.status_code == curl::status_code::forbidden || beatmap_response.status_code == curl::status_code::unauthorized) {
+    if (beatmap_response.code == curl::status_code::values::forbidden || beatmap_response.code == curl::status_code::values::unauthorized) {
         std::unique_lock<std::mutex> lock(hanaru::auth_lock, std::try_to_lock);
 
         if (lock.owns_lock()) {
@@ -242,7 +242,7 @@ drogon::Task<std::tuple<drogon::HttpStatusCode, std::string, std::string>> hanar
         co_return { drogon::k401Unauthorized, "", "our downloader become unauthorized, please try again later" };
     }
 
-    if (beatmap_response.status_code == curl::status_code::ok) {
+    if (beatmap_response.code == curl::status_code::values::ok) {
         if (beatmap_response.body.empty() || beatmap_response.body.find("PK\x03\x04") != 0) {
             LOG_WARN << "Response was not valid osz file: " << (beatmap_response.body.size() > 100 ? beatmap_response.body.substr(0, 100) : beatmap_response.body);
 
@@ -390,7 +390,7 @@ void hanaru::downloader::authorize() {
         client.set_path("/home");
         curl::response session = client.get();
 
-        if (session.status_code != curl::status_code::ok) {
+        if (session.code != curl::status_code::values::ok) {
             LOG_WARN << "invalid response from osu! website";
             downloading_enabled = false;
             instance = this;
@@ -420,7 +420,7 @@ void hanaru::downloader::authorize() {
         "&password=" + curl::utils::url_encode(this->password)
     );
 
-    if (login.status_code != curl::status_code::ok) {
+    if (login.code != curl::status_code::values::ok) {
         LOG_WARN << "invalid response from osu! website";
         downloading_enabled = false;
         instance = this;
