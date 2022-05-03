@@ -56,6 +56,11 @@ hanaru::downloader::downloader(const std::string& _username, const std::string& 
         return;
     }
 
+    drogon::app().setTermSignalHandler([&]() {
+        this->deauthorize();
+        drogon::app().quit();
+    });
+
     std::thread([&]() -> drogon::AsyncTask {
         this->authorize();
         if (!downloading_enabled) {
