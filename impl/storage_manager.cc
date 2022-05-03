@@ -4,6 +4,9 @@
 
 #include <filesystem>
 
+static hanaru::storage_manager* instance = nullptr;
+static std::thread cleaner;
+
 hanaru::storage_manager::storage_manager(
     int32_t _preferred_memory_usage,
     int32_t _max_memory_usage,
@@ -57,7 +60,7 @@ int64_t hanaru::storage_manager::memory_usage() const {
     return total_memory_usage >> 20;
 }
 
-void hanaru::storage_manager::insert(int32_t id, const hanaru::cached_beatmap& btm) const {
+void hanaru::storage_manager::insert(const int32_t id, hanaru::cached_beatmap&& btm) const {
     const int64_t mem = memory_usage();
     if (mem > max_memory_usage) {
         memory_threshold = true;
@@ -71,7 +74,7 @@ void hanaru::storage_manager::insert(int32_t id, const hanaru::cached_beatmap& b
     total_memory_usage += btm.content.size();
 
     std::unique_lock<std::shared_mutex> lock(mtx);
-    internal_cache.emplace(id, btm);
+    internal_cache.insert(std::make_pair(id, std::move(btm)));
 }
 
 std::optional<hanaru::cached_beatmap> hanaru::storage_manager::find(int32_t id) const {

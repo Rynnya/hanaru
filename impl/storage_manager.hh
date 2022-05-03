@@ -14,14 +14,13 @@ namespace hanaru {
     class cached_beatmap {
     public:
         cached_beatmap(
-            const std::string& _name,
-            const char* _data,
-            size_t _length,
-            std::chrono::system_clock::time_point _time = std::chrono::system_clock::now()
+            const std::string& name_,
+            const std::string& content_,
+            std::chrono::system_clock::time_point time_ = std::chrono::system_clock::now()
         )
-            : name(_name)
-            , content(_data, _length)
-            , timestamp(_time)
+            : name(name_)
+            , content(content_)
+            , timestamp(time_)
         {};
 
         const std::string name;
@@ -39,7 +38,7 @@ namespace hanaru {
         );
 
         int64_t memory_usage() const;
-        void insert(int32_t id, const cached_beatmap& btm) const;
+        void insert(const int32_t id, cached_beatmap&& btm) const;
         std::optional<hanaru::cached_beatmap> find(int32_t id) const;
 
         bool can_write() const;
@@ -57,8 +56,5 @@ namespace hanaru {
 
         bool allowed_to_write = true;
         mutable std::atomic_bool memory_threshold = false;
-
-        inline static storage_manager* instance = nullptr;
-        inline static std::thread cleaner;
     };
 }

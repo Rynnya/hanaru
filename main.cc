@@ -8,6 +8,8 @@
 
 #include <fstream>
 
+#include <curl/curl.h>
+
 drogon::HttpResponsePtr error_handler(drogon::HttpStatusCode code) {
     auto response = drogon::HttpResponse::newHttpResponse();
     response->setContentTypeCodeAndCustomString(CT_TEXT_PLAIN, "text/plain; charset=utf-8");
@@ -42,6 +44,7 @@ void main_callback() {
 
 int main() {
 
+    curl_global_init(CURL_GLOBAL_ALL);
     drogon::app()
         .setFloatPrecisionInJson(2, "decimal")
         .registerBeginningAdvice(main_callback)
@@ -50,8 +53,8 @@ int main() {
         .registerHandler("/favicon.ico", &favicon_handler)
         .loadConfigFile("config.json");
 
-    if (!fs::exists(hanaru::beatmap_path)) {
-        fs::create_directory(hanaru::beatmap_path);
+    if (!fs::exists(hanaru::beatmaps_folder_path)) {
+        fs::create_directory(hanaru::beatmaps_folder_path);
     }
 
     Json::Value custom_config = drogon::app().getCustomConfig();

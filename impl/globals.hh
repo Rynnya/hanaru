@@ -18,8 +18,7 @@ namespace fs = std::filesystem;
 
 namespace hanaru {
 
-    inline const fs::path beatmap_path = fs::current_path() / "beatmaps";
-    inline constexpr std::string_view empty = "";
+    inline const fs::path beatmaps_folder_path = fs::current_path() / "beatmaps";
 
     inline int64_t time_from_epoch() {
         return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now()).time_since_epoch().count();

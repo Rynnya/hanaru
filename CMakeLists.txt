@@ -9,6 +9,10 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+    add_compile_definitions(NOMINMAX)
+endif()
+
 add_executable(${PROJECT_NAME}
     controllers/beatmap_route.cc
     controllers/beatmap_route.hh
@@ -18,6 +22,8 @@ add_executable(${PROJECT_NAME}
     controllers/download_route.hh
     controllers/subscribe_route.cc
     controllers/subscribe_route.hh
+    impl/curl.cc
+    impl/curl.hh
     impl/downloader.cc
     impl/downloader.hh
     impl/globals.hh
@@ -39,8 +45,10 @@ else ()
 endif ()
 
 find_package(Drogon CONFIG REQUIRED)
-target_link_libraries(${PROJECT_NAME} PRIVATE Drogon::Drogon)
-include_directories(${JSONCPP_INCLUDE_DIRS})
+find_package(CURL REQUIRED)
+
+target_link_libraries(${PROJECT_NAME} PRIVATE Drogon::Drogon CURL::libcurl)
+include_directories(${JSONCPP_INCLUDE_DIRS} ${CURL_INCLUDE_DIR})
 
 aux_source_directory(controllers CTL_SRC)
 
