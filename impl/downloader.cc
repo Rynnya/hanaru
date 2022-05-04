@@ -32,7 +32,7 @@ namespace hanaru {
         download_client.add_header("X-CSRF-Token", hanaru::csrf_token);
         download_client.set_referer("https://osu.ppy.sh/beatmapsets/" + beatmapset_id);
 
-        download_client.set_user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.114 Safari/537.36");
+        download_client.set_user_agent("Mozilla/5.0 (Linux; webOS/2.2.4) AppleWebKit/534.6 (KHTML, like Gecko) webOSBrowser/221.56 Safari/534.6 Pre/3.0");
 
         download_client.add_cookie("XSRF-TOKEN", hanaru::csrf_token);
         download_client.add_cookie("osu_session", hanaru::osu_session);
@@ -40,6 +40,16 @@ namespace hanaru {
         co_return download_client.get();
     }
 
+    std::string update_token(const std::unordered_multimap<std::string, curl::cookie>& cookies) {
+        const auto range = cookies.equal_range("xsrf-token");
+
+        for (auto it = range.first; it != range.second; it++) {
+            // Tokens always has a same size, which is 40 (04.05.2022)
+            if (it->second.value.size() == csrf_token.size() && it->second.domain == ".ppy.sh") {
+                return it->second.value;
+            }
+        }
+    }
 }
 
 hanaru::downloader::downloader(const std::string& _username, const std::string& _password, const std::string& _api_key)
@@ -225,52 +235,68 @@ drogon::Task<std::tuple<drogon::HttpStatusCode, std::string, std::string>> hanar
     // Beatmapset wasn't found anywhere, so we download it
     curl::response beatmap_response = co_await send_request(id_as_string);
 
-    if (beatmap_response.code == curl::status_code::values::not_found) {
-        std::ofstream beatmap_file;
-        beatmap_file.open(beatmap_path);
-        beatmap_file.close();
+    switch (beatmap_response.code) {
+        // Something went wrong with our token (did the user deleted it from account settings?)
+        case curl::status_code::values::forbidden:
+        case curl::status_code::values::unauthorized: {
+            std::unique_lock<std::mutex> lock(hanaru::auth_lock, std::try_to_lock);
 
-        hanaru::storage_manager::get()->insert(id, { "", "" });
+            if (lock.owns_lock()) {
+                this->deauthorize();
+                this->authorize();
+            }
 
-        drogon::app().getIOLoop(1)->runAfter(1, [&]{ downloading_queue.erase(id); });
-        co_return { drogon::k404NotFound, "", "beatmapset doesn't exist on osu! servers or this beatmapset was banned" };
-    }
-
-    if (beatmap_response.code == curl::status_code::values::forbidden || beatmap_response.code == curl::status_code::values::unauthorized) {
-        std::unique_lock<std::mutex> lock(hanaru::auth_lock, std::try_to_lock);
-
-        if (lock.owns_lock()) {
-            this->deauthorize();
-            this->authorize();
+            co_return { drogon::k401Unauthorized, "", "our downloader become unauthorized, please try again later" };
         }
 
-        co_return { drogon::k401Unauthorized, "", "our downloader become unauthorized, please try again later" };
-    }
+        // Something went wrong with beatmap, probably doesn't exist or simply banned due to DMCA
+        case curl::status_code::values::not_found: {
+            std::ofstream beatmap_file;
+            beatmap_file.open(beatmap_path);
+            beatmap_file.close();
 
-    if (beatmap_response.code == curl::status_code::values::ok) {
-        if (beatmap_response.body.empty() || beatmap_response.body.find("PK\x03\x04") != 0) {
-            LOG_WARN << "Response was not valid osz file: " << (beatmap_response.body.size() > 100 ? beatmap_response.body.substr(0, 100) : beatmap_response.body);
+            hanaru::storage_manager::get()->insert(id, { "", "" });
 
             drogon::app().getIOLoop(1)->runAfter(1, [&] { downloading_queue.erase(id); });
-            co_return { drogon::k422UnprocessableEntity, "", "response from osu! wasn't valid osz file" };
+            co_return { drogon::k404NotFound, "", "beatmapset doesn't exist on osu! servers or this beatmapset was banned" };
         }
 
-        const std::string filename = this->get_filename_from_link(beatmap_response.headers);
-        hanaru::storage_manager::get()->insert(id, { filename, beatmap_response.body });
-
-        if (hanaru::storage_manager::get()->can_write()) {
-            db->execSqlAsync(
-                "INSERT INTO beatmaps_names (id, name) VALUES (?, ?);",
-                [](const drogon::orm::Result&) {},
-                [](const drogon::orm::DrogonDbException&) {},
-                id, filename
-            );
-
-            beatmap_response.save_to_file(beatmap_path.generic_string());
+        // Peppy's mirror's have rate limit's too!
+        case curl::status_code::values::too_many_requests: {
+            co_return { drogon::k429TooManyRequests, "", "downloader was limited by osu! system, please wait 15 minutes before retrying" };
         }
 
-        drogon::app().getIOLoop(1)->runAfter(1, [&] { downloading_queue.erase(id); });
-        co_return { drogon::k200OK, filename, beatmap_response.body };
+        // Everything went fine \o/
+        case curl::status_code::values::ok: {
+            if (beatmap_response.body.empty() || beatmap_response.body.find("PK\x03\x04") != 0) {
+                LOG_WARN << "Response was not valid osz file: " << (beatmap_response.body.size() > 100 ? beatmap_response.body.substr(0, 100) : beatmap_response.body);
+
+                drogon::app().getIOLoop(1)->runAfter(1, [&] { downloading_queue.erase(id); });
+                co_return { drogon::k422UnprocessableEntity, "", "response from osu! wasn't valid osz file" };
+            }
+
+            hanaru::csrf_token = hanaru::update_token(beatmap_response.cookies);
+            const std::string filename = this->get_filename_from_link(beatmap_response.headers);
+            hanaru::storage_manager::get()->insert(id, { filename, beatmap_response.body });
+
+            if (hanaru::storage_manager::get()->can_write()) {
+                db->execSqlAsync(
+                    "INSERT INTO beatmaps_names (id, name) VALUES (?, ?);",
+                    [](const drogon::orm::Result&) {},
+                    [](const drogon::orm::DrogonDbException&) {},
+                    id, filename
+                );
+
+                beatmap_response.save_to_file(beatmap_path.generic_string());
+            }
+
+            drogon::app().getIOLoop(1)->runAfter(1, [&] { downloading_queue.erase(id); });
+            co_return { drogon::k200OK, filename, beatmap_response.body };
+        }
+
+        default: {
+            co_return { drogon::k503ServiceUnavailable, "", "response from osu! wasn't valid" };
+        }
     }
 
     co_return { drogon::k503ServiceUnavailable, "", "response from osu! wasn't valid" };
@@ -389,7 +415,7 @@ std::string hanaru::downloader::get_filename_from_link(const std::unordered_mult
 
 void hanaru::downloader::authorize() {
     curl::client client("https://osu.ppy.sh");
-    client.set_user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.114 Safari/537.36");
+    client.set_user_agent("Mozilla/5.0 (Linux; webOS/2.2.4) AppleWebKit/534.6 (KHTML, like Gecko) webOSBrowser/221.56 Safari/534.6 Pre/3.0");
 
     {
         client.set_path("/home");
