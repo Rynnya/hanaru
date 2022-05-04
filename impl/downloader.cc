@@ -49,6 +49,8 @@ namespace hanaru {
                 return it->second.value;
             }
         }
+
+        return csrf_token;
     }
 }
 
