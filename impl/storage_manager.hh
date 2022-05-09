@@ -11,10 +11,11 @@ namespace hanaru {
 
     class cached_beatmap {
     public:
-        cached_beatmap(const std::string& name, const std::string& content, std::chrono::system_clock::time_point time = std::chrono::system_clock::now());
+        cached_beatmap(const std::string& name, const std::string& content, bool retry = false, std::chrono::system_clock::time_point time = std::chrono::system_clock::now());
 
         const std::string name;
         const std::string content;
+        const bool retry;
         const std::chrono::system_clock::time_point timestamp;
     };
 

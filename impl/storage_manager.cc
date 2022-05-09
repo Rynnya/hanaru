@@ -20,11 +20,13 @@ namespace detail {
 
 hanaru::cached_beatmap::cached_beatmap(
     const std::string& name_, 
-    const std::string& content_, 
+    const std::string& content_,
+    bool retry_,
     std::chrono::system_clock::time_point time_
 )
     : name(name_)
     , content(content_)
+    , retry(retry_)
     , timestamp(time_)
 {};
 

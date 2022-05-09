@@ -14,7 +14,7 @@
 
 namespace detail {
 
-    std::mutex queue_lock_ {};
+    std::mutex queue_mutex_ {};
     std::condition_variable queue_cond_ {};
 
     struct awaitable_condition : public drogon::CallbackAwaiter<std::shared_ptr<hanaru::cached_beatmap>> {
@@ -30,7 +30,7 @@ namespace detail {
 
             std::thread([handle = std::move(handle), this]() {
                 std::shared_ptr<hanaru::cached_beatmap> beatmap {};
-                std::unique_lock<std::mutex> lock_ { queue_lock_ };
+                std::unique_lock<std::mutex> lock_ { queue_mutex_ };
                 queue_cond_.wait(lock_, [&beatmap, this]() { beatmap = hanaru::storage_manager::get().find(id_); return beatmap; });
 
                 setValue(beatmap);
@@ -61,9 +61,16 @@ namespace detail {
     bool downloading_enabled_ = false;
     std::unordered_map<int64_t, callback_echo> downloading_queue_ {};
 
+    void unlock(int64_t id) {
+        trantor::EventLoop::getEventLoopOfCurrentThread()->runAfter(std::chrono::milliseconds(300), [&] { 
+            detail::downloading_queue_.erase(id);
+            queue_cond_.notify_all();
+        });
+    }
+
     //////////////////////////////////////////////////////////
 
-    std::mutex auth_lock_{};
+    std::mutex auth_lock_ {};
 
     // Required to deauthrorize user if needed
     std::string csrf_token_ {};
@@ -227,22 +234,9 @@ drogon::Task<std::tuple<drogon::HttpStatusCode, std::string, std::string>> hanar
     {
         std::shared_ptr<hanaru::cached_beatmap> cached = hanaru::storage_manager::get().find(id);
         if (cached) {
-            if (cached->content.size() == 0) {
-                co_return{ drogon::k404NotFound, "", "beatmapset doesn't exist on osu! servers or this beatmapset was banned" };
-            }
-
-            co_return{ drogon::k200OK, cached->name, cached->content };
-        }
-    }
-
-    // It's also can be in queue, so check it secondly
-    {
-        // If value didn't exist - it will be created and automatically grabbed by one thread because of atomic_bool
-        // Other threads will wait until job is done
-        std::shared_ptr<hanaru::cached_beatmap> cached = co_await detail::downloading_queue_[id].push(id);
-        if (cached) {
-            if (cached->content.size() == 0) {
-                co_return{ drogon::k404NotFound, "", "beatmapset doesn't exist on osu! servers or this beatmapset was banned" };
+            // Retry every 15 minutes because this might be ratelimit
+            if (cached->content.size() == 0 && (!cached->retry || (cached->timestamp + std::chrono::minutes(15) < std::chrono::system_clock::now()))) {
+                co_return { drogon::k404NotFound, "", "beatmapset doesn't exist on osu! servers or this beatmapset was banned" };
             }
 
             co_return { drogon::k200OK, cached->name, cached->content };
@@ -294,6 +288,20 @@ drogon::Task<std::tuple<drogon::HttpStatusCode, std::string, std::string>> hanar
         co_return { drogon::k429TooManyRequests, "", "rate limit, please wait 6 seconds" };
     }
 
+    {
+        // If value didn't exist - it will be created and automatically grabbed by one thread because of atomic_bool
+        // Other threads will wait until job is done
+        // This still a race condition, but at least it's not that terrable
+        std::shared_ptr<hanaru::cached_beatmap> cached = co_await detail::downloading_queue_[id].push(id);
+        if (cached) { // We should not verify `retry` here, otherwise this will ratelimit our downloader
+            if (cached->content.size() == 0) {
+                co_return { drogon::k404NotFound, "", "beatmapset doesn't exist on osu! servers or this beatmapset was banned" };
+            }
+
+            co_return { drogon::k200OK, cached->name, cached->content };
+        }
+    }
+
     // Beatmapset wasn't found anywhere, so we download it
     curl::response beatmap_response = co_await detail::send_request(id_as_string);
 
@@ -308,6 +316,9 @@ drogon::Task<std::tuple<drogon::HttpStatusCode, std::string, std::string>> hanar
                 this->authorize();
             }
 
+            hanaru::storage_manager::get().insert(id, { "", "", true });
+            detail::unlock(id);
+
             co_return { drogon::k401Unauthorized, "", "our downloader become unauthorized, please try again later" };
         }
 
@@ -317,14 +328,17 @@ drogon::Task<std::tuple<drogon::HttpStatusCode, std::string, std::string>> hanar
             beatmap_file.open(beatmap_path);
             beatmap_file.close();
 
-            hanaru::storage_manager::get().insert(id, { "", "" });
+            hanaru::storage_manager::get().insert(id, { "", "", true });
+            detail::unlock(id);
 
-            drogon::app().getIOLoop(1)->runAfter(1, [&] { detail::downloading_queue_.erase(id); });
             co_return { drogon::k404NotFound, "", "beatmapset doesn't exist on osu! servers or this beatmapset was banned" };
         }
 
         // Peppy's mirror's have rate limit's too!
         case curl::status_code::values::too_many_requests: {
+            hanaru::storage_manager::get().insert(id, { "", "", true });
+            detail::unlock(id);
+
             co_return { drogon::k429TooManyRequests, "", "downloader was limited by osu! system, please wait 15 minutes before retrying" };
         }
 
@@ -333,7 +347,9 @@ drogon::Task<std::tuple<drogon::HttpStatusCode, std::string, std::string>> hanar
             if (beatmap_response.body.empty() || beatmap_response.body.find("PK\x03\x04") != 0) {
                 LOG_WARN << "Response was not valid osz file: " << (beatmap_response.body.size() > 100 ? beatmap_response.body.substr(0, 100) : beatmap_response.body);
 
-                drogon::app().getIOLoop(1)->runAfter(1, [&] { detail::downloading_queue_.erase(id); });
+                hanaru::storage_manager::get().insert(id, { "", "", true });
+                detail::unlock(id);
+
                 co_return { drogon::k422UnprocessableEntity, "", "response from osu! wasn't valid osz file" };
             }
 
@@ -353,14 +369,20 @@ drogon::Task<std::tuple<drogon::HttpStatusCode, std::string, std::string>> hanar
                 beatmap_response.save_to_file(beatmap_path.generic_string());
             }
 
-            drogon::app().getIOLoop(1)->runAfter(1, [&] { detail::downloading_queue_.erase(id); });
+            detail::unlock(id);
             co_return { drogon::k200OK, filename, beatmap_response.body };
         }
 
         default: {
+            hanaru::storage_manager::get().insert(id, { "", "", true });
+            detail::unlock(id);
+
             co_return { drogon::k503ServiceUnavailable, "", "response from osu! wasn't valid" };
         }
     }
+
+    hanaru::storage_manager::get().insert(id, { "", "", true });
+    detail::unlock(id);
 
     co_return { drogon::k503ServiceUnavailable, "", "response from osu! wasn't valid" };
 }
