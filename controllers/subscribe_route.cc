@@ -19,11 +19,9 @@ void subscribe_route::handleNewMessage(const WebSocketConnectionPtr& ws_conn, st
     trantor::EventLoop::getEventLoopOfCurrentThread()->runInLoop(std::bind([](WebSocketConnectionPtr ws_conn, int64_t id) -> AsyncTask {
         Json::Value response = Json::objectValue;
         try {
-            typedef long long int64_t;
-
             auto [status_code, filename, binary] = co_await hanaru::downloader::get().download_map(id);
             response["id"] = id;
-            response["status"] = static_cast<int64_t>(status_code);
+            response["status"] = static_cast<Json::Int64>(status_code);
             response["data"] = drogon::utils::base64Encode(reinterpret_cast<const unsigned char*>(binary.data()), binary.size());
             response["filename"] = filename;
         }
