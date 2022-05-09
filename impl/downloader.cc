@@ -115,7 +115,9 @@ namespace detail {
         }
     }
 
-    hanaru::downloader* instance_ = nullptr;
+    //////////////////////////////////////////////////////////
+
+    static hanaru::downloader* instance_ = nullptr;
 }
 
 hanaru::downloader::downloader(const std::string& username_, const std::string& password_, const std::string& api_key_)

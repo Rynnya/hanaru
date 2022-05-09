@@ -9,7 +9,7 @@
 
 namespace detail {
 
-    hanaru::storage_manager* instance_ = nullptr;
+    static hanaru::storage_manager* instance_ = nullptr;
 
     // Hard drive information
     std::atomic_int64_t current_free_space_ = 0;
