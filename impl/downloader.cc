@@ -328,7 +328,7 @@ drogon::Task<std::tuple<drogon::HttpStatusCode, std::string, std::string>> hanar
             beatmap_file.open(beatmap_path);
             beatmap_file.close();
 
-            hanaru::storage_manager::get().insert(id, { "", "", true });
+            hanaru::storage_manager::get().insert(id, { "", "" });
             detail::unlock(id);
 
             co_return { drogon::k404NotFound, "", "beatmapset doesn't exist on osu! servers or this beatmapset was banned" };
