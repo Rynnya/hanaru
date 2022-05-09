@@ -2,96 +2,65 @@
 
 #include <drogon/HttpAppFramework.h>
 
+#include <thread>
 #include <filesystem>
 
-static hanaru::storage_manager* instance = nullptr;
-static std::thread cleaner;
+#include "concurrent_cache.hh"
+
+namespace detail {
+
+    hanaru::storage_manager* instance_ = nullptr;
+
+    // Hard drive information
+    std::atomic_int64_t current_free_space_ = 0;
+
+    // RAM information
+    std::atomic_int64_t current_ram_usage_ = 0;
+}
+
+hanaru::cached_beatmap::cached_beatmap(
+    const std::string& name_, 
+    const std::string& content_, 
+    std::chrono::system_clock::time_point time_
+)
+    : name(name_)
+    , content(content_)
+    , timestamp(time_)
+{};
 
 hanaru::storage_manager::storage_manager(
-    int32_t _preferred_memory_usage,
-    int32_t _max_memory_usage,
-    int32_t _beatmap_timeout,
-    int32_t _required_free_space
+    size_t maximum_cache_size,
+    int64_t required_free_space
 )
-    : preferred_memory_usage(std::max(512, _preferred_memory_usage))
-    , max_memory_usage(std::max(1024, _max_memory_usage))
-    , beatmap_timeout(std::max(240, _beatmap_timeout))
-    , required_free_space(std::max(1024, _required_free_space))
+    : maximum_cache_size_(std::max(32ULL, maximum_cache_size))
+    , required_free_space_(std::max(1024LL, required_free_space))
 {
-    cleaner = std::thread([&] {
-        while (true) {
-            try {
-                std::filesystem::space_info sp = std::filesystem::space(".");
-                allowed_to_write = (((sp.available >> 20) - required_free_space) > 0);
+    std::filesystem::space_info si = std::filesystem::space(".");
+    detail::current_free_space_ = si.available - (required_free_space << 20);
 
-                {
-                    std::unique_lock<std::shared_mutex> lock(mtx);
-                    auto it = internal_cache.begin();
-                    while (it != internal_cache.end()) {
-                        int64_t expire = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - it->second.timestamp).count();
-                        int64_t timeout = (preferred_memory_usage > memory_usage()) ? beatmap_timeout : beatmap_timeout >> 1;
-
-                        if (memory_threshold) { // We should cleanup memory as fast as we can
-                            timeout >>= 1;
-                        }
-
-                        if (expire > timeout) {
-                            total_memory_usage -= it->second.content.size();
-                            it = internal_cache.erase(it);
-                            continue;
-                        }
-
-                        it++;
-                    }
-                }
-
-                std::this_thread::sleep_for(std::chrono::minutes(1));
-            }
-            catch (const std::exception& ex) {
-                LOG_WARN << "exception in cleaner thread: " << ex.what();
-            }
-        }
-    });
-    instance = this;
+    detail::instance_ = this;
 }
 
 int64_t hanaru::storage_manager::memory_usage() const {
     // Convert raw bytes to megabytes
-    return total_memory_usage >> 20;
+    return detail::current_ram_usage_ >> 20;
 }
 
-void hanaru::storage_manager::insert(const int32_t id, hanaru::cached_beatmap&& btm) const {
-    const int64_t mem = memory_usage();
-    if (mem > max_memory_usage) {
-        memory_threshold = true;
-        return;
-    }
+void hanaru::storage_manager::insert(const int64_t id, hanaru::cached_beatmap&& btm) {
+    detail::current_free_space_ -= btm.content.size();
+    detail::current_ram_usage_ += btm.content.size();
 
-    if (mem < preferred_memory_usage) {
-        memory_threshold = false;
-    }
-
-    total_memory_usage += btm.content.size();
-
-    std::unique_lock<std::shared_mutex> lock(mtx);
-    internal_cache.insert(std::make_pair(id, std::move(btm)));
+    cache_.insert(id, std::move(btm));
 }
 
-std::optional<hanaru::cached_beatmap> hanaru::storage_manager::find(int32_t id) const {
-    std::shared_lock<std::shared_mutex> lock(mtx);
-    auto it = internal_cache.find(id);
-
-    if (it != internal_cache.end()) {
-        return std::make_optional<hanaru::cached_beatmap>(it->second);
-    }
-
-    return {};
+std::shared_ptr<hanaru::cached_beatmap> hanaru::storage_manager::find(int64_t id) {
+    return cache_.get(id);
 }
 
 bool hanaru::storage_manager::can_write() const {
-    return allowed_to_write;
+    return detail::current_free_space_ > 0;
 }
 
-const hanaru::storage_manager* hanaru::storage_manager::get() {
-    return instance;
+hanaru::storage_manager& hanaru::storage_manager::get() {
+    return *detail::instance_;
 }

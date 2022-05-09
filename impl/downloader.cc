@@ -1,6 +1,6 @@
 #include "downloader.hh"
 
-#include "globals.hh"
+#include "utils.hh"
 #include "rate_limiter.hh"
 #include "storage_manager.hh"
 
@@ -12,56 +12,120 @@
 
 #include "curl.hh"
 
-namespace hanaru {
+namespace detail {
 
-    static hanaru::downloader* instance = nullptr;
-    static std::mutex auth_lock {};
+    std::mutex queue_lock_ {};
+    std::condition_variable queue_cond_ {};
+
+    struct awaitable_condition : public drogon::CallbackAwaiter<std::shared_ptr<hanaru::cached_beatmap>> {
+    public:
+        awaitable_condition(int64_t id, bool should_continue = false) : id_(id), should_continue_(should_continue) {};
+
+        void await_suspend(std::coroutine_handle<> handle) {
+            if (should_continue_) {
+                setValue({});
+                handle.resume();
+                return;
+            }
+
+            std::thread([handle = std::move(handle), this]() {
+                std::shared_ptr<hanaru::cached_beatmap> beatmap {};
+                std::unique_lock<std::mutex> lock_ { queue_lock_ };
+                queue_cond_.wait(lock_, [&beatmap, this]() { beatmap = hanaru::storage_manager::get().find(id_); return beatmap; });
+
+                setValue(beatmap);
+                handle.resume();
+            }).detach();
+        }
+    private:
+        int64_t id_ = 0;
+        bool should_continue_ = false;
+    };
+
+    class callback_echo {
+    public:
+        callback_echo() = default;
+
+        awaitable_condition push(int64_t beatmap_id) {
+            if (first_callback.exchange(false)) {
+                return awaitable_condition(beatmap_id, true);
+            }
+
+            return awaitable_condition(beatmap_id);
+        }
+
+    private:
+        std::atomic_bool first_callback = true;
+    };
+
+    bool downloading_enabled_ = false;
+    std::unordered_map<int64_t, callback_echo> downloading_queue_ {};
+
+    //////////////////////////////////////////////////////////
+
+    std::mutex auth_lock_{};
 
     // Required to deauthrorize user if needed
-    static std::string csrf_token {};
-    static std::string osu_session {};
+    std::string csrf_token_ {};
+    std::string osu_session_ {};
 
-    drogon::Task<curl::response> send_request(const std::string& beatmapset_id) {
-        curl::client download_client("https://osu.ppy.sh");
+    struct curl_awaitable : public drogon::CallbackAwaiter<curl::response> {
+    public:
+        curl_awaitable(const std::string& beatmapset_id) : beatmapset_id_(beatmapset_id) {};
 
-        download_client.set_path("/beatmapsets/" + beatmapset_id + "/download");
-        download_client.set_parameter("noVideo", "1");
+        void await_suspend(std::coroutine_handle<> handle) {
+            trantor::EventLoop::getEventLoopOfCurrentThread()->runInLoop([handle = std::move(handle), this]() {
+                curl::client download_client("https://osu.ppy.sh");
 
-        download_client.add_header("Alt-Used", "osu.ppy.sh");
-        download_client.add_header("Connection", "keep-alive");
-        download_client.add_header("X-CSRF-Token", hanaru::csrf_token);
-        download_client.set_referer("https://osu.ppy.sh/beatmapsets/" + beatmapset_id);
+                download_client.set_path("/beatmapsets/" + beatmapset_id_ + "/download");
+                download_client.set_parameter("noVideo", "1");
 
-        download_client.set_user_agent("Mozilla/5.0 (Linux; webOS/2.2.4) AppleWebKit/534.6 (KHTML, like Gecko) webOSBrowser/221.56 Safari/534.6 Pre/3.0");
+                download_client.add_header("Alt-Used", "osu.ppy.sh");
+                download_client.add_header("Connection", "keep-alive");
+                download_client.add_header("X-CSRF-Token", detail::csrf_token_);
+                download_client.set_referer("https://osu.ppy.sh/beatmapsets/" + beatmapset_id_);
 
-        download_client.add_cookie("XSRF-TOKEN", hanaru::csrf_token);
-        download_client.add_cookie("osu_session", hanaru::osu_session);
+                download_client.set_user_agent(HANARU_USER_AGENT);
 
-        co_return download_client.get();
+                download_client.add_cookie("XSRF-TOKEN", detail::csrf_token_);
+                download_client.add_cookie("osu_session", detail::osu_session_);
+
+                setValue(download_client.get());
+                handle.resume();
+            });
+        }
+
+    private:
+        std::string beatmapset_id_ {};
+    };
+
+    curl_awaitable send_request(const std::string& beatmapset_id) {
+        return curl_awaitable(beatmapset_id);
     }
 
-    std::string update_token(const std::unordered_multimap<std::string, curl::cookie>& cookies) {
+    void update_token(const std::unordered_multimap<std::string, curl::cookie>& cookies) {
         const auto range = cookies.equal_range("xsrf-token");
 
         for (auto it = range.first; it != range.second; it++) {
             // Tokens always has a same size, which is 40 (04.05.2022)
-            if (it->second.value.size() == csrf_token.size() && it->second.domain == ".ppy.sh") {
-                return it->second.value;
+            if (it->second.value.size() == csrf_token_.size() && it->second.domain == ".ppy.sh") {
+                csrf_token_ = it->second.value;
+                return;
             }
         }
-
-        return csrf_token;
     }
+
+    hanaru::downloader* instance_ = nullptr;
 }
 
-hanaru::downloader::downloader(const std::string& _username, const std::string& _password, const std::string& _api_key)
-    : username(_username)
-    , password(_password)
-    , api_key(_api_key)
+hanaru::downloader::downloader(const std::string& username_, const std::string& password_, const std::string& api_key_)
+    : username(username_)
+    , password(password_)
+    , api_key(api_key_)
 {
     b_client->setUserAgent("hanaru/" HANARU_VERSION);
     s_client->setUserAgent("hanaru/" HANARU_VERSION);
-    instance = this;
+    detail::instance_ = this;
 
     if (username.empty() || password.empty()) {
         LOG_WARN << "downloading disabled due empty login and password";
@@ -73,9 +137,10 @@ hanaru::downloader::downloader(const std::string& _username, const std::string& 
         drogon::app().quit();
     });
 
+    // This thread will keep our current session online, because peppy's tokens expires every 30 days if not used
     std::thread([&]() -> drogon::AsyncTask {
         this->authorize();
-        if (!downloading_enabled) {
+        if (!detail::downloading_enabled_) {
             co_return;
         }
 
@@ -97,7 +162,7 @@ hanaru::downloader::downloader(const std::string& _username, const std::string& 
     }).detach();
 }
 
-drogon::Task<std::tuple<Json::Value, drogon::HttpStatusCode>> hanaru::downloader::download_beatmap(int32_t id) {
+drogon::Task<std::tuple<Json::Value, drogon::HttpStatusCode>> hanaru::downloader::download_beatmap(int64_t id) {
     if (api_key.empty()) {
         co_return not_found;
     }
@@ -122,7 +187,7 @@ drogon::Task<std::tuple<Json::Value, drogon::HttpStatusCode>> hanaru::downloader
     co_return not_found;
 }
 
-drogon::Task<std::tuple<Json::Value, drogon::HttpStatusCode>> hanaru::downloader::download_beatmapset(int32_t id) {
+drogon::Task<std::tuple<Json::Value, drogon::HttpStatusCode>> hanaru::downloader::download_beatmapset(int64_t id) {
     if (api_key.empty()) {
         co_return not_found;
     }
@@ -151,30 +216,44 @@ drogon::Task<std::tuple<Json::Value, drogon::HttpStatusCode>> hanaru::downloader
     co_return not_found;
 }
 
-drogon::Task<std::tuple<drogon::HttpStatusCode, std::string, std::string>> hanaru::downloader::download_map(int32_t id) {
+drogon::Task<std::tuple<drogon::HttpStatusCode, std::string, std::string>> hanaru::downloader::download_map(int64_t id) {
     if (!hanaru::rate_limit::consume(1)) {
         co_return { drogon::k429TooManyRequests, "", "rate limit, please try again" };
     }
 
-    drogon::orm::DbClientPtr db = drogon::app().getDbClient();
-    const std::string id_as_string = std::to_string(id);
-
+    // Firstly we must check if beatmap in cache
     {
-        std::optional<hanaru::cached_beatmap> cached = hanaru::storage_manager::get()->find(id);
-        if (cached.has_value()) {
+        std::shared_ptr<hanaru::cached_beatmap> cached = hanaru::storage_manager::get().find(id);
+        if (cached) {
             if (cached->content.size() == 0) {
-                co_return { drogon::k404NotFound, "", "beatmapset doesn't exist on osu! servers or this beatmapset was banned" };
+                co_return{ drogon::k404NotFound, "", "beatmapset doesn't exist on osu! servers or this beatmapset was banned" };
+            }
+
+            co_return{ drogon::k200OK, cached->name, cached->content };
+        }
+    }
+
+    // It's also can be in queue, so check it secondly
+    {
+        // If value didn't exist - it will be created and automatically grabbed by one thread because of atomic_bool
+        // Other threads will wait until job is done
+        std::shared_ptr<hanaru::cached_beatmap> cached = co_await detail::downloading_queue_[id].push(id);
+        if (cached) {
+            if (cached->content.size() == 0) {
+                co_return{ drogon::k404NotFound, "", "beatmapset doesn't exist on osu! servers or this beatmapset was banned" };
             }
 
             co_return { drogon::k200OK, cached->name, cached->content };
         }
     }
 
-    const fs::path beatmap_path = beatmaps_folder_path / id_as_string;
-
     if (!hanaru::rate_limit::consume(20)) {
         co_return { drogon::k429TooManyRequests, "", "rate limit, please wait 2 seconds" };
     }
+
+    drogon::orm::DbClientPtr db = drogon::app().getDbClient();
+    const std::string id_as_string = std::to_string(id);
+    const fs::path beatmap_path = beatmaps_folder_path / id_as_string;
 
     // Trying to find on disk
     if (fs::exists(beatmap_path)) {
@@ -189,59 +268,38 @@ drogon::Task<std::tuple<drogon::HttpStatusCode, std::string, std::string>> hanar
 
         // Beatmap doesn't exist on server, but we cache it to reduce activity to osu! servers
         if (contents.empty()) {
-            hanaru::storage_manager::get()->insert(id, { "", "" });
+            hanaru::storage_manager::get().insert(id, { "", "" });
             co_return { drogon::k404NotFound, "", "beatmapset doesn't exist on osu! servers or this beatmapset was banned" };
         }
 
         std::string filename = id_as_string + ".osz";
         const auto& result = co_await db->execSqlCoro("SELECT name FROM beatmaps_names WHERE id = ? LIMIT 1;", id);
+
         if (!result.empty()) {
             const auto& row = result.front();
             filename = row["name"].as<std::string>();
         }
 
-        hanaru::storage_manager::get()->insert(id, { filename, contents });
+        hanaru::storage_manager::get().insert(id, { filename, contents });
         co_return { drogon::k200OK, filename, contents };
     }
 
-    if (!downloading_enabled) {
+    if (!detail::downloading_enabled_) {
         co_return { drogon::k423Locked, "", "downloading disabled" };
-    }
-
-    while (downloading_queue.find(id) != downloading_queue.end()) {
-        std::optional<hanaru::cached_beatmap> cached = hanaru::storage_manager::get()->find(id);
-        if (cached.has_value()) {
-            if (cached->content.size() == 0) {
-                co_return { drogon::k404NotFound, "", "beatmapset doesn't exist on osu! servers or this beatmapset was banned" };
-            }
-
-            co_return { drogon::k200OK, cached->name, cached->content };
-        }
-
-        trantor::EventLoop* loop = trantor::EventLoop::getEventLoopOfCurrentThread();
-        if (loop == nullptr) {
-            loop = drogon::app().getIOLoop(1);
-        }
-        
-        co_await drogon::sleepCoro(loop, std::chrono::milliseconds(500));
     }
 
     if (!hanaru::rate_limit::consume(40)) {
         co_return { drogon::k429TooManyRequests, "", "rate limit, please wait 6 seconds" };
     }
 
-    // Should we use lock here? Actually no, until we not under DDOS or something like this
-    // Even under DDOS we just hit rate limit, which will stop the whole process
-    downloading_queue.insert(id);
-
     // Beatmapset wasn't found anywhere, so we download it
-    curl::response beatmap_response = co_await send_request(id_as_string);
+    curl::response beatmap_response = co_await detail::send_request(id_as_string);
 
     switch (beatmap_response.code) {
         // Something went wrong with our token (did the user deleted it from account settings?)
         case curl::status_code::values::forbidden:
         case curl::status_code::values::unauthorized: {
-            std::unique_lock<std::mutex> lock(hanaru::auth_lock, std::try_to_lock);
+            std::unique_lock<std::mutex> lock(detail::auth_lock_, std::try_to_lock);
 
             if (lock.owns_lock()) {
                 this->deauthorize();
@@ -257,9 +315,9 @@ drogon::Task<std::tuple<drogon::HttpStatusCode, std::string, std::string>> hanar
             beatmap_file.open(beatmap_path);
             beatmap_file.close();
 
-            hanaru::storage_manager::get()->insert(id, { "", "" });
+            hanaru::storage_manager::get().insert(id, { "", "" });
 
-            drogon::app().getIOLoop(1)->runAfter(1, [&] { downloading_queue.erase(id); });
+            drogon::app().getIOLoop(1)->runAfter(1, [&] { detail::downloading_queue_.erase(id); });
             co_return { drogon::k404NotFound, "", "beatmapset doesn't exist on osu! servers or this beatmapset was banned" };
         }
 
@@ -273,15 +331,16 @@ drogon::Task<std::tuple<drogon::HttpStatusCode, std::string, std::string>> hanar
             if (beatmap_response.body.empty() || beatmap_response.body.find("PK\x03\x04") != 0) {
                 LOG_WARN << "Response was not valid osz file: " << (beatmap_response.body.size() > 100 ? beatmap_response.body.substr(0, 100) : beatmap_response.body);
 
-                drogon::app().getIOLoop(1)->runAfter(1, [&] { downloading_queue.erase(id); });
+                drogon::app().getIOLoop(1)->runAfter(1, [&] { detail::downloading_queue_.erase(id); });
                 co_return { drogon::k422UnprocessableEntity, "", "response from osu! wasn't valid osz file" };
             }
 
-            hanaru::csrf_token = hanaru::update_token(beatmap_response.cookies);
+            detail::update_token(beatmap_response.cookies);
             const std::string filename = this->get_filename_from_link(beatmap_response.headers);
-            hanaru::storage_manager::get()->insert(id, { filename, beatmap_response.body });
 
-            if (hanaru::storage_manager::get()->can_write()) {
+            hanaru::storage_manager::get().insert(id, { filename, beatmap_response.body });
+
+            if (hanaru::storage_manager::get().can_write()) {
                 db->execSqlAsync(
                     "INSERT INTO beatmaps_names (id, name) VALUES (?, ?);",
                     [](const drogon::orm::Result&) {},
@@ -292,7 +351,7 @@ drogon::Task<std::tuple<drogon::HttpStatusCode, std::string, std::string>> hanar
                 beatmap_response.save_to_file(beatmap_path.generic_string());
             }
 
-            drogon::app().getIOLoop(1)->runAfter(1, [&] { downloading_queue.erase(id); });
+            drogon::app().getIOLoop(1)->runAfter(1, [&] { detail::downloading_queue_.erase(id); });
             co_return { drogon::k200OK, filename, beatmap_response.body };
         }
 
@@ -304,8 +363,8 @@ drogon::Task<std::tuple<drogon::HttpStatusCode, std::string, std::string>> hanar
     co_return { drogon::k503ServiceUnavailable, "", "response from osu! wasn't valid" };
 }
 
-hanaru::downloader* const hanaru::downloader::get() {
-    return instance;
+hanaru::downloader& hanaru::downloader::get() {
+    return *detail::instance_;
 }
 
 Json::Value hanaru::downloader::serialize_beatmap(const Json::Value& json) const {
@@ -417,7 +476,7 @@ std::string hanaru::downloader::get_filename_from_link(const std::unordered_mult
 
 void hanaru::downloader::authorize() {
     curl::client client("https://osu.ppy.sh");
-    client.set_user_agent("Mozilla/5.0 (Linux; webOS/2.2.4) AppleWebKit/534.6 (KHTML, like Gecko) webOSBrowser/221.56 Safari/534.6 Pre/3.0");
+    client.set_user_agent(HANARU_USER_AGENT);
 
     {
         client.set_path("/home");
@@ -425,8 +484,8 @@ void hanaru::downloader::authorize() {
 
         if (session.code != curl::status_code::values::ok) {
             LOG_WARN << "invalid response from osu! website";
-            downloading_enabled = false;
-            instance = this;
+            detail::downloading_enabled_ = false;
+            detail::instance_ = this;
             return;
         }
 
@@ -434,7 +493,7 @@ void hanaru::downloader::authorize() {
             client.add_cookie(cookie.key, cookie.value);
 
             if (cookie.key == "XSRF-TOKEN") {
-                csrf_token = cookie.value;
+                detail::csrf_token_ = cookie.value;
             }
         }
     }
@@ -445,18 +504,18 @@ void hanaru::downloader::authorize() {
     client.add_header("Origin", "https://osu.ppy.sh");
     client.add_header("Alt-Used", "osu.ppy.sh");
     client.add_header("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
-    client.add_header("X-CSRF-Token", csrf_token);
+    client.add_header("X-CSRF-Token", detail::csrf_token_);
 
     curl::response login = client.post(
-        "_token=" + curl::utils::url_encode(csrf_token) + 
+        "_token=" + curl::utils::url_encode(detail::csrf_token_) +
         "&username=" + curl::utils::url_encode(this->username) +
         "&password=" + curl::utils::url_encode(this->password)
     );
 
     if (login.code != curl::status_code::values::ok) {
         LOG_WARN << "invalid response from osu! website";
-        downloading_enabled = false;
-        instance = this;
+        detail::downloading_enabled_ = false;
+        detail::instance_ = this;
         return;
     }
 
@@ -466,21 +525,21 @@ void hanaru::downloader::authorize() {
     for (const auto [_, cookie] : login.cookies) {
         if (cookie.domain == ".ppy.sh") {
             if (cookie.key == "XSRF-TOKEN") {
-                csrf_token = cookie.value;
+                detail::csrf_token_ = cookie.value;
             }
 
             if (cookie.key == "osu_session") {
-                osu_session = cookie.value;
+                detail::osu_session_ = cookie.value;
             }
         }
     }
 
-    downloading_enabled = true;
-    instance = this;
+    detail::downloading_enabled_ = true;
+    detail::instance_ = this;
 }
 
 void hanaru::downloader::deauthorize() {
-    if (csrf_token.empty() || osu_session.empty()) {
+    if (detail::csrf_token_.empty() || detail::osu_session_.empty()) {
         LOG_WARN << "Trying to deauthorize user with empty csrf token or osu session";
         return;
     }
@@ -492,12 +551,12 @@ void hanaru::downloader::deauthorize() {
 
     client.add_header("Origin", "https://osu.ppy.sh");
     client.add_header("Alt-Used", "osu.ppy.sh");
-    client.add_header("X-CSRF-Token", csrf_token);
+    client.add_header("X-CSRF-Token", detail::csrf_token_);
 
-    client.add_cookie("XSRF-TOKEN", csrf_token);
-    client.add_cookie("osu_session", osu_session);
+    client.add_cookie("XSRF-TOKEN", detail::csrf_token_);
+    client.add_cookie("osu_session", detail::osu_session_);
 
     client.del();
-    csrf_token.clear();
-    osu_session.clear();
+    detail::csrf_token_.clear();
+    detail::osu_session_.clear();
 }

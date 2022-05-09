@@ -1,7 +1,7 @@
 #include <drogon/drogon.h>
 
 #include "impl/downloader.hh"
-#include "impl/globals.hh"
+#include "impl/utils.hh"
 #include "impl/storage_manager.hh"
 
 #include "controllers/subscribe_route.hh"
@@ -23,7 +23,7 @@ void default_handler(const drogon::HttpRequestPtr& req, std::function<void(const
     response->setContentTypeCodeAndCustomString(CT_TEXT_PLAIN, "text/plain; charset=utf-8");
     response->setBody(
         "hanaru v" HANARU_VERSION "\n"
-        "cache memory usage: " + std::to_string(hanaru::storage_manager::get()->memory_usage()) + " mb's\n"
+        "cache memory usage: " + std::to_string(hanaru::storage_manager::get().memory_usage()) + " mb's\n"
         "source code: https://github.com/Rynnya/hanaru"
     );
     callback(response);
@@ -66,10 +66,8 @@ int main() {
     );
 
     hanaru::storage_manager sm(
-        custom_config["preferred_memory_usage"].asInt(),
-        custom_config["max_memory_usage"].asInt(),
-        custom_config["beatmap_timeout"].asInt(),
-        custom_config["required_free_space"].asInt()
+        custom_config["maximum_cache_size"].asUInt64(),
+        custom_config["required_free_space"].asInt64()
     );
 
     drogon::app().run();

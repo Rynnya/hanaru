@@ -26,11 +26,12 @@ add_executable(${PROJECT_NAME}
     impl/curl.hh
     impl/downloader.cc
     impl/downloader.hh
-    impl/globals.hh
     impl/rate_limiter.cc
     impl/rate_limiter.hh
     impl/storage_manager.cc
     impl/storage_manager.hh
+    impl/utils.cc
+    impl/utils.hh
     main.cc
 )
 

@@ -155,9 +155,9 @@ namespace curl {
         response() noexcept = default;
         ~response() noexcept = default;
 
-        response(const response&) = delete;
+        response(const response&) = default;
         response(response&&) noexcept = default;
-        response& operator=(const response&) = delete;
+        response& operator=(const response&) = default;
         response& operator=(response&&) noexcept = default;
 
         // Returns true if write was successfully, otherwise false (or if overwrite was false and file already exist)

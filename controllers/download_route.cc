@@ -1,10 +1,10 @@
 #include "download_route.hh"
 
 #include "../impl/downloader.hh"
-#include "../impl/globals.hh"
+#include "../impl/utils.hh"
 
-Task<HttpResponsePtr> download_route::get(HttpRequestPtr req, int32_t id) {
-    const auto [code, filename, content] = co_await hanaru::downloader::get()->download_map(id);
+Task<HttpResponsePtr> download_route::get(HttpRequestPtr req, int64_t id) {
+    const auto [code, filename, content] = co_await hanaru::downloader::get().download_map(id);
 
     if (code != k200OK) {
         SEND_ERROR(code, content);
@@ -15,6 +15,7 @@ Task<HttpResponsePtr> download_route::get(HttpRequestPtr req, int32_t id) {
         content.size(),
         filename
     );
+
     response->setContentTypeCodeAndCustomString(drogon::CT_CUSTOM, "application/x-osu-beatmap-archive");
 
     co_return response;

@@ -14,15 +14,11 @@ it requires g++ or MSVC with C++20 and coroutines supports (CLang doesn't suppor
 
 # Optionals
 
-hanaru allows you to specify `beatmapset_timeout`, `max_memory_usage` and `preferred_memory_usage` in `config.json` in order to reduce memory usage
+hanaru allows you to specify `maximum_cache_size` in `config.json` in order to reduce memory usage
 ```json
-"preferred_memory_usage": 6144, // In megabytes, recommended value is `max_memory_usage` / 2
-"max_memory_usage": 8192, // In megabytes, please leave at least 2 gb for your system!
-"beatmapset_timeout": 1200 // In seconds
+"maximum_cache_size": 128
 ```
-after reaching `preferred_memory_usage` cache system starts to remove more recent beatmaps<br>
-if default timeout was 20 minutes, in 'preferred' mode it become 10 minutes (divided by 2)<br>
-after reaching `max_memory_usage` cache system doesn't accept beatmaps anymore until memory usage doesn't become lower than `max_memory_usage`, and beatmap timeout become 5 minutes if default timeout was 20 (divided by 4)
+please keep in mind that LRU cache won't be cleaned until this number, so memory will constantly in use!
 
 hanaru also allows you to specify amount of required free space on hard drive
 ```json
@@ -30,8 +26,8 @@ hanaru also allows you to specify amount of required free space on hard drive
 ```
 by default `required_free_space` is 5 GB, which optimal for HDD, but might be low if you running this on SDD (o.o)<br>
 minimal is 1 GB (or 1024), because drogon can left some other stuff in `uploads` folder<br>
-please note that this value cannot be precisely verified, as this will decrease performance, so check runs every minute<br>
-so leave at least around 500 mb above your limit, just in case
+please note that this value cannot be precisely verified, since the value is taken only at the start of the program<br>
+so settings this value to something like 25 GB might be good if this enough, if not - please don't be greedy
 
 # Compatability
 hanaru uses own JSON structure for `/s/` and `/b/` routes, which will be copied to [Aru][3] later<br>

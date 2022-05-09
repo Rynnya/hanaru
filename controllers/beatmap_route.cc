@@ -1,10 +1,10 @@
 #include "beatmap_route.hh"
 
-#include "../impl/globals.hh"
+#include "../impl/utils.hh"
 #include "../impl/downloader.hh"
 #include "../impl/rate_limiter.hh"
 
-Task<HttpResponsePtr> beatmap_route::get(HttpRequestPtr req, int32_t id) {
+Task<HttpResponsePtr> beatmap_route::get(HttpRequestPtr req, int64_t id) {
     if (!hanaru::rate_limit::consume(1)) {
         SEND_ERROR(k429TooManyRequests, "rate limit, please try again");
     }
@@ -19,7 +19,7 @@ Task<HttpResponsePtr> beatmap_route::get(HttpRequestPtr req, int32_t id) {
             SEND_ERROR(k429TooManyRequests, "rate limit, please wait 1 second");
         }
 
-        const auto [body, status] = co_await hanaru::downloader::get()->download_beatmap(id);
+        const auto [body, status] = co_await hanaru::downloader::get().download_beatmap(id);
         auto response = HttpResponse::newHttpJsonResponse(body);
         response->setStatusCode(status);
         co_return response;

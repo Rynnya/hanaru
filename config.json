@@ -20,9 +20,7 @@
         "osu_api_key": "",
         "osu_username": "",
         "osu_password": "",
-        "preferred_memory_usage": 2048,
-        "max_memory_usage": 4096,
-        "beatmap_timeout": 1200,
+        "maximum_cache_size": 128,
         "required_free_space": 5120
     }
 }
