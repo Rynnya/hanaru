@@ -3,8 +3,6 @@
 #include <drogon/HttpAppFramework.h>
 #include <drogon/HttpClient.h>
 
-#include <unordered_set>
-
 namespace hanaru {
 
     class downloader {

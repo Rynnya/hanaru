@@ -4,15 +4,12 @@
 #include "impl/utils.hh"
 #include "impl/storage_manager.hh"
 
-#include "controllers/subscribe_route.hh"
-
 #include <fstream>
-
 #include <curl/curl.h>
 
 drogon::HttpResponsePtr error_handler(drogon::HttpStatusCode code) {
     auto response = drogon::HttpResponse::newHttpResponse();
-    response->setContentTypeCodeAndCustomString(CT_TEXT_PLAIN, "text/plain; charset=utf-8");
+    response->setContentTypeCodeAndCustomString(drogon::ContentType::CT_TEXT_PLAIN, "text/plain; charset=utf-8");
     response->setBody("unhandled error");
     response->setStatusCode(code);
     return response;
@@ -20,7 +17,7 @@ drogon::HttpResponsePtr error_handler(drogon::HttpStatusCode code) {
 
 void default_handler(const drogon::HttpRequestPtr& req, std::function<void(const drogon::HttpResponsePtr &)>&& callback) {
     auto response = drogon::HttpResponse::newHttpResponse();
-    response->setContentTypeCodeAndCustomString(CT_TEXT_PLAIN, "text/plain; charset=utf-8");
+    response->setContentTypeCodeAndCustomString(drogon::ContentType::CT_TEXT_PLAIN, "text/plain; charset=utf-8");
     response->setBody(
         "hanaru v" HANARU_VERSION "\n"
         "cache memory usage: " + std::to_string(hanaru::storage_manager::get().memory_usage()) + " mb's\n"
