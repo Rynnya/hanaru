@@ -32,8 +32,8 @@ hanaru::storage_manager::storage_manager(
     size_t maximum_cache_size,
     int64_t required_free_space
 )
-    : maximum_cache_size_(std::max(32ULL, maximum_cache_size))
-    , required_free_space_(std::max(1024LL, required_free_space))
+    : maximum_cache_size_(std::max(static_cast<size_t>(32), maximum_cache_size))
+    , required_free_space_(std::max(static_cast<int64_t>(1024), required_free_space))
 {
     std::filesystem::space_info si = std::filesystem::space(".");
     detail::current_free_space_ = si.available - (required_free_space << 20);
