@@ -20,7 +20,6 @@
         "osu_api_key": "",
         "osu_username": "",
         "osu_password": "",
-        "maximum_cache_size": 128,
         "required_free_space": 5120
     }
 }

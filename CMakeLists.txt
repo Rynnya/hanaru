@@ -5,7 +5,7 @@ if (WIN32)
     include(${CMAKE_TOOLCHAIN_FILE})
 endif ()
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -14,36 +14,22 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
 endif()
 
 add_executable(${PROJECT_NAME}
-    controllers/beatmap_route.cc
-    controllers/beatmap_route.hh
-    controllers/beatmap_set_route.cc
-    controllers/beatmap_set_route.hh
-    controllers/download_route.cc
-    controllers/download_route.hh
-    controllers/subscribe_route.cc
-    controllers/subscribe_route.hh
-    impl/curl.cc
-    impl/curl.hh
-    impl/downloader.cc
-    impl/downloader.hh
-    impl/rate_limiter.cc
-    impl/rate_limiter.hh
-    impl/storage_manager.cc
-    impl/storage_manager.hh
-    impl/utils.cc
-    impl/utils.hh
-    main.cc
+    src/controllers/beatmap_route.cc
+    src/controllers/beatmap_route.hh
+    src/controllers/beatmap_set_route.cc
+    src/controllers/beatmap_set_route.hh
+    src/controllers/download_route.cc
+    src/controllers/download_route.hh
+    src/impl/downloader.cc
+    src/impl/downloader.hh
+    src/impl/storage_manager.cc
+    src/impl/storage_manager.hh
+    src/impl/utils.cc
+    src/impl/utils.hh
+    src/thirdparty/curler.cc
+    src/thirdparty/curler.hh
+    src/main.cc
 )
-
-# Clang doesn't supported by drogon
-if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++20 -fcoroutines")
-elseif (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /std:c++latest")
-else ()
-    message(WARNING "unknown compiler, trying to use default configuration for coroutines")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++20 -fcoroutines")
-endif ()
 
 find_package(Drogon CONFIG REQUIRED)
 find_package(CURL REQUIRED)
@@ -52,8 +38,14 @@ target_link_libraries(${PROJECT_NAME} PRIVATE Drogon::Drogon CURL::libcurl)
 include_directories(${JSONCPP_INCLUDE_DIRS} ${CURL_INCLUDE_DIR})
 
 aux_source_directory(controllers CTL_SRC)
+target_sources(${PROJECT_NAME} PRIVATE ${SRC_DIR} ${CTL_SRC})
 
-target_sources(${PROJECT_NAME}
-               PRIVATE
-               ${SRC_DIR}
-               ${CTL_SRC})
+if (MSVC)
+	file(GLOB_RECURSE _source_list *.hpp *.c* *.h*)
+	foreach(_source IN ITEMS ${_source_list})
+		get_filename_component(_source_path "${_source}" PATH)
+		string(REPLACE "${CMAKE_SOURCE_DIR}" "" _group_path "${_source_path}")
+		string(REPLACE "/" "\\" _group_path "${_group_path}")
+		source_group("${_group_path}" FILES "${_source}")
+	endforeach()
+endif()
