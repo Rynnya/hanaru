@@ -26,13 +26,15 @@
 
 #include "curler.hh"
 
-#include <algorithm>
-#include <array>
-#include <ctime>
-#include <fstream>
-#include <iomanip>
-#include <sstream>
-#include <vector>
+#include <algorithm> // std::transform
+#include <array> // std::array
+#include <ctime> // timegm
+#include <filesystem> // std::filesystem::exists
+#include <fstream> // std::fstream
+#include <future> // std::future, std::promise
+#include <iomanip> // std::get_time
+#include <sstream> // std::istringstream
+#include <vector> // std::vector
 
 #include <curl/curl.h>
 
@@ -70,15 +72,15 @@ namespace detail {
 
 #endif
 
-    namespace fnv1a32 {
+    namespace fnv1a {
 
-        constexpr uint32_t offsetBasis = 2166136261U;
-        constexpr uint32_t primeNumber = 16777619u;
+        constexpr uint64_t offsetBasis = 14695981039346656037ULL;
+        constexpr uint64_t primeNumber = 1099511628211ULL;
 
-        constexpr uint32_t digest(const char* str) {
-            uint32_t hash = offsetBasis;
+        constexpr uint64_t digest(const char* str) {
+            uint64_t hash = offsetBasis;
 
-            for (uint32_t i = 0; str[i] != '\0'; i++) {
+            for (size_t i = 0; str[i] != '\0'; i++) {
                 hash = primeNumber * (hash ^ static_cast<unsigned char>(str[i]));
             }
 
@@ -86,27 +88,6 @@ namespace detail {
         }
 
     }
-
-    class Client {
-    public:
-        Client() noexcept : handle { curl_easy_init() } {}
-        ~Client() noexcept {
-            curl_slist_free_all(headers);
-            curl_easy_cleanup(handle);
-        }
-
-        CURL* handle;
-        struct curl_slist* headers = nullptr;
-
-        curl::Factory::postRequestHandler postRequestHandler = nullptr;
-        curl::Factory::onErrorHandler onErrorHandler = nullptr;
-        curl::Factory::onExceptionHandler onExceptionHandler = nullptr;
-        curl::Factory::finalHandler finalHandler = nullptr;
-
-        bool saveCookiesInHeaders_ = false;
-
-        curl::Response response {};
-    };
 
     int64_t getHttpDate(const std::string& httpStringDate) {
         static const std::array<const char*, 4> formats = {
@@ -122,7 +103,7 @@ namespace detail {
 
         struct tm tmpTm {};
         for (const char* format : formats) {
-            if (strptime(httpStringDate.c_str(), format, &tmpTm) != nullptr) {
+            if (strptime(httpStringDate.data(), format, &tmpTm) != nullptr) {
                 return timegm(&tmpTm);
             }
         }
@@ -135,9 +116,10 @@ namespace detail {
             return {};
         }
 
-        std::vector<std::string> values;
+        std::vector<std::string> values {};
         size_t last = 0;
         size_t next = 0;
+
         while ((next = str.find(delimiter, last)) != std::string::npos) {
             if (next > last) {
                 values.push_back(str.substr(last, next - last));
@@ -151,6 +133,17 @@ namespace detail {
         }
 
         return values;
+    }
+
+    std::string toLower(const std::string& str) {
+        std::string copy = str;
+        std::transform(copy.begin(), copy.end(), copy.begin(), [](unsigned char c) noexcept { return std::tolower(c); });
+        return copy;
+    }
+
+    std::string toLower(std::string&& str) {
+        std::transform(str.begin(), str.end(), str.begin(), [](unsigned char c) noexcept { return std::tolower(c); });
+        return str;
     }
 
     void splitCookie(std::string& cookie, size_t ptr, std::string& name, std::string& value) {
@@ -179,22 +172,19 @@ namespace detail {
     }
 
     size_t writeCallback(char* ptr, size_t size, size_t nmemb, void* userdata) {
-        const size_t res = size * nmemb;
+        const size_t res { size * nmemb };
         static_cast<std::string*>(userdata)->append(ptr, res);
         return res;
     }
 
     size_t headerCallback(char* ptr, size_t size, size_t nmemb, void* userdata) {
         const size_t res = size * nmemb;
-        const std::string header = std::string(ptr, res);
+        const std::string header { ptr, res };
 
         const auto& it = header.find(':');
         if (it == std::string::npos) {
             return res;
         }
-
-        std::string key = header.substr(0, it);
-        std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) noexcept { return std::tolower(c); });
 
         /*
         * Let me explain a little bit this -> header.substr(it + 2, res - it - 4)
@@ -202,7 +192,7 @@ namespace detail {
         * Well, offset to get rid of header name and ':' and ' ' after header
         * And then we remove additional '\r\n' from end, cuz no one really needs this
         */
-        static_cast<std::unordered_multimap<std::string, std::string>*>(userdata)->insert({ key, header.substr(it + 2, res - it - 4) });
+        static_cast<std::unordered_multimap<std::string, std::string>*>(userdata)->insert({ toLower(header.substr(0, it)), header.substr(it + 2, res - it - 4) });
         return res;
     }
 
@@ -226,40 +216,40 @@ namespace detail {
                 continue;
             }
 
-            std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) noexcept { return std::tolower(c); });
-            switch (fnv1a32::digest(name.c_str())) {
-                case fnv1a32::digest("path"): {
+            name = toLower(std::move(name));
+            switch (fnv1a::digest(name.data())) {
+                case fnv1a::digest("path"): {
                     newCookie.path = value;
                     break;
                 }
-                case fnv1a32::digest("domain"): {
+                case fnv1a::digest("domain"): {
                     newCookie.domain = value;
                     break;
                 }
-                case fnv1a32::digest("expires"): {
+                case fnv1a::digest("expires"): {
                     newCookie.expires = getHttpDate(value);
                     break;
                 }
-                case fnv1a32::digest("secure"): {
+                case fnv1a::digest("secure"): {
                     newCookie.secure = true;
                     break;
                 }
-                case fnv1a32::digest("httponly"): {
+                case fnv1a::digest("httponly"): {
                     newCookie.httpOnly = true;
                     break;
                 }
-                case fnv1a32::digest("samesite"): {
-                    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) noexcept { return std::tolower(c); });
-                    switch (fnv1a32::digest(value.c_str())) {
-                        case fnv1a32::digest("lax"): {
+                case fnv1a::digest("samesite"): {
+                    value = toLower(std::move(value));
+                    switch (fnv1a::digest(value.data())) {
+                        case fnv1a::digest("lax"): {
                             newCookie.sameSite = curl::Cookie::SameSitePolicy::Lax;
                             break;
                         }
-                        case fnv1a32::digest("strict"): {
+                        case fnv1a::digest("strict"): {
                             newCookie.sameSite = curl::Cookie::SameSitePolicy::Strict;
                             break;
                         }
-                        case fnv1a32::digest("none"): {
+                        case fnv1a::digest("none"): {
                             newCookie.sameSite = curl::Cookie::SameSitePolicy::None;
                             break;
                         }
@@ -269,7 +259,7 @@ namespace detail {
                     }
                     break;
                 }
-                case fnv1a32::digest("max-age"): {
+                case fnv1a::digest("max-age"): {
                     newCookie.maxAge = std::stoll(value);
                     break;
                 }
@@ -286,7 +276,7 @@ namespace detail {
 namespace curl {
 
     StatusCode::StatusCode(StatusCode::Values value) noexcept
-        : value_(value)
+        : value_ { value }
     {}
 
     StatusCode::StatusCode(uint32_t value) noexcept {
@@ -431,22 +421,23 @@ namespace curl {
     }
 
     bool Response::saveToFile(const std::string& filename, bool overwrite) const noexcept {
-        if (!overwrite) {
-            std::unique_ptr<FILE, decltype(&fclose)> file { fopen(filename.c_str(), "r"), &fclose };
-            if (file) {
-                return false;
-            }
-        }
+        std::error_code errc {};
 
-        std::ofstream output { filename, std::ios::binary };
-        if (output.bad()) {
+        if (!overwrite && std::filesystem::exists(filename, errc)) {
             return false;
         }
 
-        output << this->body;
-        output.flush();
+        std::fstream fileHandle { filename, std::ios::binary | std::ios::out };
 
-        return output.good();
+        // Verify if file can be open properly
+        if (fileHandle.fail()) {
+            return false;
+        }
+
+        fileHandle << this->body;
+        fileHandle.flush();
+
+        return fileHandle.good();
     }
 
     Factory::Builder::Builder(const std::string& host)
@@ -483,7 +474,7 @@ namespace curl {
         headers_.clear();
 
         referer_.clear();
-        userAgent_ = "curler/1.0";
+        userAgent_.clear();
 
         followRedirects_ = true;
         saveCookiesInHeaders_ = false;
@@ -538,7 +529,46 @@ namespace curl {
     }
 
     Factory::Builder& Factory::Builder::addHeader(const std::string& key, const std::string& value) {
-        static_cast<void>(headers_.insert({ key, value }));
+        std::string header = detail::toLower(key);
+
+        switch (detail::fnv1a::digest(header.data())) {
+            case detail::fnv1a::digest("referer"): {
+                referer_ = value;
+                break;
+            }
+            case detail::fnv1a::digest("user-agent"): {
+                userAgent_ = value;
+                break;
+            }
+            case detail::fnv1a::digest("cookie"): {
+                cookies_.clear();
+                std::vector<std::string> cookies = detail::splitString(value, ";");
+
+                for (const std::string& fullCookie : cookies) {
+                    curl::Cookie cookie = detail::splitCookie(fullCookie);
+                    cookies_.insert({ cookie.key, cookie.value });
+                }
+
+                break;
+            }
+            default: {
+                static_cast<void>(headers_.insert({ key, value }));
+                break;
+            }
+
+            // Forbidden headers (https://developer.mozilla.org/en-US/docs/Glossary/Forbidden_header_name)
+            case detail::fnv1a::digest("accept-charset"): // deprecated
+            case detail::fnv1a::digest("accept-encoding"): // deprecated
+            case detail::fnv1a::digest("access-control-request-headers"): // CORS, disallowed
+            case detail::fnv1a::digest("access-control-request-method"): // CORS, disallowed
+            case detail::fnv1a::digest("content-length"): // CURL will handle this
+            case detail::fnv1a::digest("content-encoding"): // CURL will handle this
+            case detail::fnv1a::digest("date"): // deprecated, might be misleading
+            case detail::fnv1a::digest("host"): // CURL will handle this
+            case detail::fnv1a::digest("origin"): // CURL will handle this
+                break;
+        }
+
         return *this;
     }
 
@@ -549,11 +579,23 @@ namespace curl {
 
     Factory::Builder& Factory::Builder::resetHeaders() noexcept {
         headers_.clear();
+        referer_.clear();
+        userAgent_.clear();
         return *this;
     }
 
     Factory::Builder& Factory::Builder::resetCookies() noexcept {
         cookies_.clear();
+        return *this;
+    }
+
+    Builder& Factory::Builder::resetReferer() noexcept {
+        referer_.clear();
+        return *this;
+    }
+
+    Builder& Factory::Builder::resetUserAgent() noexcept {
+        userAgent_.clear();
         return *this;
     }
 
@@ -612,7 +654,7 @@ namespace curl {
         return *this;
     }
 
-    std::string utils::urlEncode(const std::string& src) {
+    std::string Utils::urlEncode(const std::string& src) {
         std::string result;
         std::string::const_iterator iter;
 
@@ -709,7 +751,7 @@ namespace curl {
         return result;
     }
 
-    std::string utils::urlDecode(const std::string& src) {
+    std::string Utils::urlDecode(const std::string& src) {
         std::string result;
         const size_t len = src.length();
         result.reserve(len * 2);
@@ -759,7 +801,7 @@ namespace curl {
         return result;
     }
 
-    std::string utils::charToHex(char c) {
+    std::string Utils::charToHex(char c) {
         std::string result;
         result.reserve(2);
 
@@ -773,6 +815,27 @@ namespace curl {
 
         return result;
     }
+
+    class Factory::Client {
+    public:
+        Client() noexcept : handle { curl_easy_init() } {}
+        ~Client() noexcept {
+            curl_slist_free_all(headers);
+            curl_easy_cleanup(handle);
+        }
+
+        CURL* handle;
+        struct curl_slist* headers = nullptr;
+
+        curl::Factory::postRequestHandler postRequestHandler = nullptr;
+        curl::Factory::onErrorHandler onErrorHandler = nullptr;
+        curl::Factory::onExceptionHandler onExceptionHandler = nullptr;
+        curl::Factory::finalHandler finalHandler = nullptr;
+
+        bool saveCookiesInHeaders_ = false;
+
+        curl::Response response {};
+    };
 
     Factory::Factory(long maxAmountOfConcurrentConnections, long maxConnectionTimeoutInMilliseconds)
         : maxConnectionTimeout_ { maxConnectionTimeoutInMilliseconds > 0 ? maxConnectionTimeoutInMilliseconds : 0 }
@@ -804,15 +867,69 @@ namespace curl {
     }
 
     void Factory::pushRequest(const Builder& builder) {
-        detail::Client* client = new detail::Client();
+        std::unique_ptr<Client> client = createClient(builder);
+
+        if (builder.preRequestCallback_) {
+            try {
+                builder.preRequestCallback_(builder);
+            }
+            catch (...) {
+                try {
+                    if (builder.onExceptionHandler_) {
+                        builder.onExceptionHandler_(ExceptionType::OnPreRequest, std::current_exception());
+                    }
+                }
+                catch (...) { /* ignored */ }
+
+                return;
+            }
+        }
+
+        client->postRequestHandler = builder.postRequestCallback_;
+        client->onErrorHandler = builder.onErrorHandler_;
+        client->onExceptionHandler = builder.onExceptionHandler_;
+        client->finalHandler = builder.finalHandler_;
+
+        Client* rawClient = client.release();
+        curl_easy_setopt(rawClient->handle, CURLOPT_PRIVATE, rawClient);
+        curl_multi_add_handle(static_cast<CURLM*>(handle_), rawClient->handle);
+
+        currentAmountOfRequests_++;
+        cv_.notify_one();
+    }
+
+    Response Factory::syncRequest(const Builder& builder) {
+        std::promise<Response> promise {};
+        std::future<Response> future = promise.get_future();
+        std::unique_ptr<Client> client = createClient(builder);
+
+        client->postRequestHandler = [&promise](curl::Response& resp) mutable {
+            promise.set_value(std::move(resp));
+        };
+        client->onErrorHandler = [&promise](curl::Response& resp) mutable {
+            promise.set_value(std::move(resp));
+        };
+
+        Client* rawClient = client.release();
+        curl_easy_setopt(rawClient->handle, CURLOPT_PRIVATE, rawClient);
+        curl_multi_add_handle(static_cast<CURLM*>(handle_), rawClient->handle);
+
+        currentAmountOfRequests_++;
+        cv_.notify_one();
+
+        return future.get();
+    }
+
+    std::unique_ptr<Factory::Client> Factory::createClient(const Builder& builder) {
+        std::unique_ptr<Client> client = std::make_unique<Client>();
         std::string url = builder.host_ + builder.path_;
 
         if (builder.query_.size() > 0) {
             url.push_back('?');
 
-            for (const std::pair<std::string, std::string>& pair : builder.query_) {
-                url.append(utils::urlEncode(pair.first)).push_back('=');
-                url.append(utils::urlEncode(pair.second)).push_back('&');
+            for (const auto& [key, value] : builder.query_) {
+                url.append(Utils::urlEncode(key)).push_back('=');
+                url.append(Utils::urlEncode(value)).push_back('&');
             }
 
             url.pop_back();
@@ -820,32 +937,32 @@ namespace curl {
 
         if (builder.cookies_.size() > 0) {
             std::string cookie_header {};
-            for (const std::pair<std::string, std::string>& pair : builder.cookies_) {
-                cookie_header.append(pair.first).push_back('=');
-                cookie_header.append(pair.second).push_back(';');
+            for (const auto& [key, value] : builder.cookies_) {
+                cookie_header.append(key).push_back('=');
+                cookie_header.append(value).push_back(';');
             }
 
             cookie_header.pop_back();
-            curl_easy_setopt(client->handle, CURLOPT_COOKIE, cookie_header.c_str());
+            curl_easy_setopt(client->handle, CURLOPT_COOKIE, cookie_header.data());
         }
 
         if (builder.headers_.size() > 0) {
-            for (const std::pair<std::string, std::string>& pair : builder.headers_) {
-                const std::string head = pair.first + ": " + pair.second;
-                client->headers = curl_slist_append(client->headers, head.c_str());
+            for (const auto& [key, value] : builder.headers_) {
+                const std::string head = key + ": " + value;
+                client->headers = curl_slist_append(client->headers, head.data());
             }
 
             curl_easy_setopt(client->handle, CURLOPT_HTTPHEADER, client->headers);
         }
 
-        curl_easy_setopt(client->handle, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(client->handle, CURLOPT_URL, url.data());
         curl_easy_setopt(client->handle, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
 
         if (!builder.referer_.empty()) {
-            curl_easy_setopt(client->handle, CURLOPT_REFERER, builder.referer_.c_str());
+            curl_easy_setopt(client->handle, CURLOPT_REFERER, builder.referer_.data());
         }
 
-        curl_easy_setopt(client->handle, CURLOPT_USERAGENT, builder.userAgent_.empty() ? "curler/1.0" : builder.userAgent_.c_str());
+        curl_easy_setopt(client->handle, CURLOPT_USERAGENT, builder.userAgent_.empty() ? "curler/1.0" : builder.userAgent_.data());
 
         if (builder.followRedirects_) {
             curl_easy_setopt(client->handle, CURLOPT_FOLLOWLOCATION, 1L);
@@ -897,33 +1014,10 @@ namespace curl {
             }
         }
 
-        if (builder.preRequestCallback_) {
-            try {
-                builder.preRequestCallback_(builder, url);
-            }
-            catch (...) {
-                try {
-                    if (builder.onExceptionHandler_) {
-                        builder.onExceptionHandler_(ExceptionType::OnPreRequest, std::current_exception());
-                    }
-                }
-                catch (...) { /* ignored */ }
-            }
-        }
-
-        client->postRequestHandler = builder.postRequestCallback_;
-        client->onErrorHandler = builder.onErrorHandler_;
-        client->onExceptionHandler = builder.onExceptionHandler_;
-        client->finalHandler = builder.finalHandler_;
-
         client->response.type = builder.type_;
         client->saveCookiesInHeaders_ = builder.saveCookiesInHeaders_;
 
-        curl_easy_setopt(client->handle, CURLOPT_PRIVATE, client);
-        curl_multi_add_handle(static_cast<CURLM*>(handle_), client->handle);
-
-        currentAmountOfRequests_++;
-        cv_.notify_one();
+        return client;
     }
 
     void Factory::runFactory() {
@@ -938,44 +1032,47 @@ namespace curl {
 
             CURLMsg* message = nullptr;
             while ((message = curl_multi_info_read(static_cast<CURLM*>(handle_), &messagesLeft))) {
-                detail::Client* client = nullptr;
+                Client* client = nullptr;
                 curl_easy_getinfo(message->easy_handle, CURLINFO_PRIVATE, &client);
 
                 if (message->msg == CURLMSG_DONE) {
                     if (message->data.result == CURLE_OK) {
-                        if (client->postRequestHandler) {
+                        try {
                             const auto range = client->response.headers.equal_range("set-cookie");
                             for (auto it = range.first; it != range.second; it++) {
                                 Cookie newCookie = detail::splitCookie(it->second);
                                 client->response.cookies.insert({ newCookie.key, newCookie });
                             }
+                        }
+                        catch (...) { /* ignored */ }
 
-                            if (!client->saveCookiesInHeaders_) {
-                                client->response.headers.erase("set-cookie");
-                            }
+                        if (!client->saveCookiesInHeaders_) {
+                            client->response.headers.erase("set-cookie");
+                        }
 
-                            long sc = 0;
-                            curl_easy_getinfo(client->handle, CURLINFO_RESPONSE_CODE, &sc);
-                            client->response.code = sc;
+                        long sc = 0;
+                        curl_easy_getinfo(client->handle, CURLINFO_RESPONSE_CODE, &sc);
+                        client->response.code = sc;
 
-                            try {
+                        try {
+                            if (client->postRequestHandler) {
                                 client->postRequestHandler(client->response);
                             }
-                            catch (...) {
-                                try {
-                                    if (client->onExceptionHandler) {
-                                        client->onExceptionHandler(ExceptionType::OnPostRequest, std::current_exception());
-                                    }
+                        }
+                        catch (...) {
+                            try {
+                                if (client->onExceptionHandler) {
+                                    client->onExceptionHandler(ExceptionType::OnPostRequest, std::current_exception());
                                 }
-                                catch (...) { /* ignored */ }
                             }
+                            catch (...) { /* ignored */ }
                         }
                     }
                     else if (client->onErrorHandler) {
-                        client->response.code = StatusCode::Values::Failed;
-                        client->response.error = curl_easy_strerror(message->data.result);
-
                         try {
+                            client->response.code = StatusCode::Values::Failed;
+                            client->response.error = curl_easy_strerror(message->data.result);
+
                             client->onErrorHandler(client->response);
                         }
                         catch (...) {
@@ -989,10 +1086,10 @@ namespace curl {
                     }
                 }
                 else if (client->onErrorHandler) {
-                    client->response.code = StatusCode::Values::Failed;
-                    client->response.error = "Something went wrong inside curl_multi_perform so it's doesn't returned CURLMSG_DONE.";
-
                     try {
+                        client->response.code = StatusCode::Values::Failed;
+                        client->response.error = "Something went wrong inside curl_multi_perform so it's doesn't returned CURLMSG_DONE.";
+
                         client->onErrorHandler(client->response);
                     }
                     catch (...) {

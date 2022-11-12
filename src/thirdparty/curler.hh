@@ -44,6 +44,8 @@
 
 namespace curl {
 
+    // Class that represents all values that declared as standard.
+    // Can be moved (noexcept) and copied (noexcept)
     class StatusCode {
     public:
         enum class Values : uint32_t {
@@ -112,6 +114,11 @@ namespace curl {
         StatusCode(StatusCode::Values value) noexcept;
         StatusCode(uint32_t value) noexcept;
 
+        StatusCode(const StatusCode&) noexcept = default;
+        StatusCode(StatusCode&&) noexcept = default;
+        StatusCode& operator=(const StatusCode&) noexcept = default;
+        StatusCode& operator=(StatusCode&&) noexcept = default;
+
         explicit operator std::string();
         explicit operator uint32_t() noexcept;
         operator Values() noexcept;
@@ -120,6 +127,7 @@ namespace curl {
         StatusCode::Values value_ = Values::Null;
     };
 
+    // Request types that can be used in this library.
     enum class RequestType : uint8_t {
         GET = 0,
         HEAD = 1,
@@ -129,15 +137,23 @@ namespace curl {
         PATCH = 5
     };
 
+    // Exceptions that can happend when request invoked.
     enum class ExceptionType : uint8_t {
         OnError = 0,
         OnPreRequest = 1,
         OnPostRequest = 2
     };
 
+    // Class that represents a cookie information.
+    // Can be moved (noexcept) and copied.
     class Cookie {
     public:
         Cookie() noexcept = default;
+
+        Cookie(const Cookie&) = default;
+        Cookie(Cookie&&) noexcept = default;
+        Cookie& operator=(const Cookie&) = default;
+        Cookie& operator=(Cookie&&) noexcept = default;
 
         enum class SameSitePolicy : uint8_t {
             None = 0,
@@ -156,6 +172,8 @@ namespace curl {
         SameSitePolicy sameSite = SameSitePolicy::None;
     };
 
+    // Class that contains all information about response.
+    // Can be moved (noexcept) and copied.
     class Response {
     public:
         Response() noexcept = default;
@@ -166,7 +184,11 @@ namespace curl {
         Response& operator=(const Response&) = default;
         Response& operator=(Response&&) noexcept = default;
 
-        // Returns true if write was successfully, otherwise false (or if overwrite was false and file already exist)
+        // Writes whole body object into file.
+        // Returns:
+        //  - True if everything was written correctly.
+        //  - False if something went wrong.
+        //  - False if overwrite was true and non-empty file was open.
         bool saveToFile(const std::string& filename, bool overwrite = false) const noexcept;
 
         StatusCode code = StatusCode::Values::Null;
@@ -175,11 +197,12 @@ namespace curl {
         std::unordered_multimap<std::string, Cookie> cookies {};
         std::string body {};
 
-        // Will be empty if no error occurred
+        // Will be empty if no error occurred.
         std::string error {};
     };
 
-    class utils {
+    // Some useful utilities for encoding and decoding data.
+    class Utils {
     public:
         static std::string urlEncode(const std::string& src);
         static std::string urlDecode(const std::string& src);
@@ -187,16 +210,25 @@ namespace curl {
         static std::string charToHex(char c);
     };
 
+    // Main class of library, handles all incoming requests and outcoming responses.
+    // Exception specification 'None' doesn't mean that this function is exception-safe.
+    // It's means that library will produce no exceptions by itself.
+    // Allocations and internal functions can throw exceptions.
+    // Only functions, declared as 'noexcept' cannot throw exceptions.
+    // Cannot be moved or copied.
     class Factory {
     public:
         class Builder;
 
-        typedef std::function<void(const Builder&, const std::string&)> preRequestHandler;
+        typedef std::function<void(const Builder&)> preRequestHandler;
         typedef std::function<void(Response&)> postRequestHandler;
         typedef std::function<void(Response&)> onErrorHandler;
         typedef std::function<void(ExceptionType, std::exception_ptr)> onExceptionHandler;
         typedef std::function<void()> finalHandler;
 
+        // Class that represents a blueprint for request.
+        // Can be moved (noexcept) and cannot be copied.
+        // Cannot be constructed outside of Factory.
         class Builder {
             friend class Factory;
 
@@ -208,9 +240,9 @@ namespace curl {
             Builder& reset() noexcept;
 
             Builder(const Builder&) = delete;
-            Builder(Builder&&) = default;
+            Builder(Builder&&) noexcept = default;
             Builder& operator=(const Builder&) = delete;
-            Builder& operator=(Builder&&) = default;
+            Builder& operator=(Builder&&) noexcept = default;
 
             Builder& setRequestType(RequestType type) noexcept;
             Builder& setPath(const std::string& path);
@@ -222,15 +254,21 @@ namespace curl {
             Builder& addHeader(const std::string& key, const std::string& value);
             Builder& addCookie(const std::string& key, const std::string& value);
 
+            // This also resets referer and user-agent headers.
             Builder& resetHeaders() noexcept;
             Builder& resetCookies() noexcept;
+            Builder& resetReferer() noexcept;
+            Builder& resetUserAgent() noexcept;
 
+            // Have the same effect as calling 'addHeader("Referer", referer);'
             Builder& setReferer(const std::string& referer);
+            // Have the same effect as calling 'addHeader("User-Agent", agent);'
             Builder& setUserAgent(const std::string& agent);
             Builder& followRedirects(bool state = true) noexcept;
             Builder& saveCookiesInHeaders(bool state = false) noexcept;
 
             // Called before adding handle into query.
+            // If this callback throws an exception, then whole request will be rejected immediately.
             Builder& preRequest(preRequestHandler&& callback) noexcept;
             // Called when request fully done, contains result of request.
             Builder& onComplete(postRequestHandler&& callback) noexcept;
@@ -268,10 +306,12 @@ namespace curl {
         };
 
         // Creates a factory which will create a thread for curl and allows you to create a builders.
+        // This constructor is NOT thread-safe (unless curl 7.84.0+ is used and CURL_VERSION_THREADSAFE bit is set)
         // Exceptions:
         //  - std::system_error from std::thread::thread (ctor)
         Factory(long maxAmountOfConcurrentConnections = 0, long maxConnectionTimeoutInMilliseconds = 0);
         // Destructor for Factory. Current requests will be completed and all resources will be freed before destructor is returned.
+        // The destructor is NOT thread-safe (unless curl 7.84.0+ is used and CURL_VERSION_THREADSAFE bit is set)
         // Exceptions:
         //  - None (std::system_error from std::thread::join is handled)
         ~Factory() noexcept;
@@ -283,18 +323,28 @@ namespace curl {
 
         // Create a builder which can be used as blueprint for requests.
         // Can be used multiple times.
+        // This method is thread-safe.
         // Exceptions:
         //  - std::runtime_error if host is empty or invalid
         Builder createRequest(const std::string& host);
         // Performs a request using provided blueprint.
+        // This method is thread-safe.
         // Exceptions:
         //  - None
         void pushRequest(const Builder& builder);
+        // Performs a synchronous request using provided blueprint.
+        // User-defined callbacks WILL BE IGNORED and you will receive raw response.
+        // This method is thread-safe.
+        // Exceptions:
+        //  - None
+        Response syncRequest(const Builder& builder);
 
     private:
+        class Client;
+
+        std::unique_ptr<Client> createClient(const Builder& builder);
         void runFactory();
 
-        // type-erasing because CURLM most of the time is typedef to void
         void* handle_ = nullptr;
         long maxConnectionTimeout_ = 0;
 
@@ -305,8 +355,8 @@ namespace curl {
         std::atomic_bool destructorCalled_ { false };
     };
 
-    // typedef to make user-space code more clear
     typedef Factory::Builder Builder;
+
 }
 
-#endif
+#endif // CURL_ER_GUARD_08_10_2022_

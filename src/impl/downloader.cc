@@ -22,92 +22,67 @@ namespace detail {
 
     curl::Factory factory_ {};
     curl::Builder authBuilder_ = factory_.createRequest("https://osu.ppy.sh");
-    std::mutex requestMutex_ {};
     std::mutex reAuthMutex_ {};
-    std::condition_variable cv_ {};
 
     void auth() {
         if (valid_) {
             return;
         }
 
-        bool requestDone = false;
+        authBuilder_
+            .setPath("/home")
+            .setUserAgent(HANARU_USER_AGENT)
+            .setRequestType(curl::RequestType::GET);
+        curl::Response mainPageResponse = factory_.syncRequest(authBuilder_);
+
+        if (mainPageResponse.code != curl::StatusCode::Values::OK) {
+            return;
+        }
+
+        for (const auto& [_, cookie] : mainPageResponse.cookies) {
+            authBuilder_.addCookie(cookie.key, cookie.value);
+
+            if (cookie.key == "XSRF-TOKEN") {
+                xsrfToken_ = cookie.value;
+            }
+        }
 
         authBuilder_
-            .setUserAgent(HANARU_USER_AGENT)
-            .setPath("/home")
-            .setRequestType(curl::RequestType::GET)
-            // cannot use onDestroy here because this will called after first request, but not after second (which must call unlock)
-            .onException([&requestDone](curl::ExceptionType, std::exception_ptr) {
-                requestDone = true;
-                cv_.notify_one();
-            })
-            .onError([&requestDone](curl::Response&) {
-                requestDone = true;
-                cv_.notify_one();
-            })
-            .onComplete([&requestDone](curl::Response& result) {
-                if (result.code != curl::StatusCode::Values::OK) {
-                    requestDone = true;
-                    cv_.notify_one();
-                    return;
+            .setPath("/session")
+            .setReferer("https://osu.ppy.sh/home")
+            .addHeader("Origin", "https://osu.ppy.sh")
+            .addHeader("Alt-Used", "osu.ppy.sh")
+            .addHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+            .addHeader("X-CSRF-Token", xsrfToken_)
+            .setRequestType(curl::RequestType::POST)
+            .setBody(
+                "_token=" + curl::Utils::urlEncode(xsrfToken_) +
+                "&username=" + curl::Utils::urlEncode(username_) +
+                "&password=" + curl::Utils::urlEncode(password_)
+            );
+
+        curl::Response authResponse = factory_.syncRequest(authBuilder_);
+
+        if (authResponse.code != curl::StatusCode::Values::OK) {
+            return;
+        }
+
+        authBuilder_.resetCookies();
+        authBuilder_.resetHeaders();
+
+        for (const auto& [_, cookie] : authResponse.cookies) {
+            if (cookie.domain == ".ppy.sh") {
+                if (cookie.key == "XSRF-TOKEN") {
+                    xsrfToken_ = cookie.value;
                 }
 
-                for (const auto& [_, cookie] : result.cookies) {
-                    authBuilder_.addCookie(cookie.key, cookie.value);
-
-                    if (cookie.key == "XSRF-TOKEN") {
-                        xsrfToken_ = cookie.value;
-                    }
+                if (cookie.key == "osu_session") {
+                    sessionToken_ = cookie.value;
                 }
+            }
+        }
 
-                authBuilder_
-                    .setPath("/session")
-                    .setReferer("https://osu.ppy.sh/home")
-                    .addHeader("Origin", "https://osu.ppy.sh")
-                    .addHeader("Alt-Used", "osu.ppy.sh")
-                    .addHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
-                    .addHeader("X-CSRF-Token", xsrfToken_)
-                    .setRequestType(curl::RequestType::POST)
-                    .setBody(
-                        "_token=" + curl::utils::urlEncode(xsrfToken_) +
-                        "&username=" + curl::utils::urlEncode(username_) +
-                        "&password=" + curl::utils::urlEncode(password_)
-                    )
-                    .onDestroy([&requestDone]() {
-                        requestDone = true;
-                        cv_.notify_one();
-                    })
-                    .onComplete([&requestDone](curl::Response& r) {
-                        if (r.code != curl::StatusCode::Values::OK) {
-                            return;
-                        }
-
-                        authBuilder_.resetCookies();
-                        authBuilder_.resetHeaders();
-
-                        for (const auto& [_, cookie] : r.cookies) {
-                            if (cookie.domain == ".ppy.sh") {
-                                if (cookie.key == "XSRF-TOKEN") {
-                                    xsrfToken_ = cookie.value;
-                                }
-
-                                if (cookie.key == "osu_session") {
-                                    sessionToken_ = cookie.value;
-                                }
-                            }
-                        }
-
-                        valid_ = true;
-                    });
-
-                factory_.pushRequest(authBuilder_);
-            });
-
-        factory_.pushRequest(authBuilder_);
-
-        std::unique_lock<std::mutex> lock { requestMutex_ };
-        cv_.wait(lock, [&requestDone]() { return requestDone; });
+        valid_ = true;
     }
 
     void deAuth() {
@@ -115,7 +90,6 @@ namespace detail {
             return;
         }
 
-        bool requestDone = false;
         authBuilder_
             .setPath("/session")
             .setReferer("https://osu.ppy.sh")
@@ -124,16 +98,8 @@ namespace detail {
             .addHeader("X-CSRF-Token", xsrfToken_)
             .addCookie("XSRF-TOKEN", xsrfToken_)
             .addCookie("osu_session", sessionToken_)
-            .setRequestType(curl::RequestType::DELETE)
-            .onDestroy([&requestDone]() {
-                requestDone = true;
-                cv_.notify_one();
-            });
-
-        factory_.pushRequest(authBuilder_);
-        
-        std::unique_lock<std::mutex> lock { requestMutex_ };
-        cv_.wait(lock, [&requestDone]() { return requestDone; });
+            .setRequestType(curl::RequestType::DELETE);
+        static_cast<void>(factory_.syncRequest(authBuilder_));
 
         xsrfToken_.clear();
         sessionToken_.clear();
@@ -149,7 +115,7 @@ namespace hanaru {
         detail::username_ = username;
         detail::password_ = password;
 
-        //detail::auth(); TODO
+        detail::auth();
     }
     
     void downloader::downloadBeatmap(int64_t id, std::function<void(std::tuple<Json::Value, drogon::HttpStatusCode>&&)>&& callback) {
@@ -177,7 +143,7 @@ namespace hanaru {
                 return;
             }
 
-            Json::Value map = serializeBeatmap(jsonResponse->operator[](0));
+            Json::Value map = serializeBeatmap((*jsonResponse)[0]);
             if (map["beatmap_id"].isNumeric()) {
                 callback({ map, drogon::k200OK });
                 return;
@@ -243,10 +209,10 @@ namespace hanaru {
 
         drogon::orm::DbClientPtr db = drogon::app().getDbClient();
         std::string idAsString = std::to_string(id);
-        const fs::path beatmapPath = hanaru::beatmapsFolderPath / idAsString;
+        const std::filesystem::path beatmapPath = hanaru::storage::getBeatmapsPath() / idAsString;
 
         // Trying to find beatmap on disk
-        if (fs::exists(beatmapPath)) {
+        if (std::filesystem::exists(beatmapPath)) {
             std::ifstream beatmapFile { beatmapPath, std::ios::binary };
 
             std::string contents {};

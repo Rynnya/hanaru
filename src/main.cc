@@ -40,7 +40,7 @@ void mainHandler() {
 int main() {
 
     drogon::app()
-        .setThreadNum(drogon::app().getThreadNum() - 1)
+        .setThreadNum(drogon::app().getThreadNum() / 2)
         .setFloatPrecisionInJson(2, "decimal")
         .registerBeginningAdvice(mainHandler)
         .setCustomErrorHandler(errorHandler)
@@ -48,14 +48,14 @@ int main() {
         .registerHandler("/favicon.ico", &faviconHandler)
         .loadConfigFile("config.json");
 
-    if (!fs::exists(hanaru::beatmapsFolderPath)) {
-        fs::create_directory(hanaru::beatmapsFolderPath);
-    }
-
     Json::Value customConfig = drogon::app().getCustomConfig();
 
     hanaru::downloader::initialize(customConfig["osu_api_key"].asString(), customConfig["osu_username"].asString(), customConfig["osu_password"].asString());
-    hanaru::storage::initialize(customConfig["required_free_space"].asUInt64());
+    hanaru::storage::initialize(customConfig["beatmaps_path"].asString(), customConfig["required_free_space"].asUInt64());
+
+    if (!std::filesystem::exists(hanaru::storage::getBeatmapsPath())) {
+        std::filesystem::create_directory(hanaru::storage::getBeatmapsPath());
+    }
 
     drogon::app().run();
 

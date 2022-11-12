@@ -11,7 +11,7 @@ if "%VCPKG_ROOT%"=="" (
 echo === VCPKG_ROOT is %VCPKG_ROOT% ===
 
 REM install 64bit packages that we need
-vcpkg install --triplet x64-windows "curl" "drogon"
+vcpkg install --triplet x64-windows "curl" "drogon[core,mysql,redis]" --recurse
 
 pushd "%~dp0"
     mkdir build

@@ -2,8 +2,6 @@
 
 namespace hanaru {
 
-    const fs::path beatmapsFolderPath = fs::current_path() / "beatmaps";
-
     int64_t timeFromEpoch() {
         return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now()).time_since_epoch().count();
     }
